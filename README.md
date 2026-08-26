@@ -14,6 +14,8 @@
 > you make or sell one, or know the material well, please [get in
 > touch](#contact). Detail in [Status](#status) below.
 
+<br>
+
 ![Borrowed Light — the sun's colours, gathered from many places into one room, moment by moment. Small sensors on rooftops in different parts of the world read the colour of the daylight above them.](media/borrowed-light-poster.jpg)
 
 **Borrowed light: the sun's colours, gathered from many places into one room, moment by moment.**
@@ -57,6 +59,10 @@ If you make, sell, or know this kind of material, I would be glad to [hear from 
 ## Technical notes
 
 Adafruit QT Py ESP32-S2, OPT4048 tristimulus colour sensor, Voltaic P126 solar panel (6V, 2W), 2000 mAh LiPo battery, BQ24074 charge controller, MQTT over Wi-Fi, custom 3D-printed enclosure. On-device loop: read CIE x,y chromaticity and lux, publish over MQTT. Server: convert to kelvin, render true colour from the raw measurement. Each unit is designed and hand-built, running on solar power alone with no mains connection. The sensor measures the light itself, not the sky's appearance.
+
+![Three views of a sensor unit: the assembled enclosure beside its solar panel, the same unit opened out to show the dome, the stacked boards and the battery sled, and the handheld reference colour meter reading 5417K at +0.005 Duv.](media/prototype_01.jpg)
+
+*Left: an assembled unit with its solar panel. Centre: the same unit opened out — dome and clamp ring, sensor deck, and the sled carrying the microcontroller, fuel gauge and charge controller. Right: the reference colour meter the units are calibrated against.*
 
 The rest of this page is the long version of that summary.
 
@@ -117,8 +123,9 @@ A full build guide — bill of materials, wiring, assembly, print settings — i
 
 ## Contact
 
-**Paul Calver** — contact details are on the
-[project page](https://8minutes20.studio/borrowedlight).
+**Paul Calver** — [paulcalver@me.com](mailto:paulcalver@me.com)
+
+Project page: [8minutes20.studio/borrowedlight](https://8minutes20.studio/borrowedlight)
 
 Do get in touch about a dome material or supplier, about putting a sensor on a
 roof somewhere the network does not yet reach, or about the project generally.
