@@ -117,9 +117,8 @@ A full build guide — bill of materials, wiring, assembly, print settings — i
 
 ## Contact
 
-**Paul Calver** — [paulcalver@me.com](mailto:paulcalver@me.com)
-
-Project page: [8minutes20.studio/borrowedlight](https://8minutes20.studio/borrowedlight)
+**Paul Calver** — contact details are on the
+[project page](https://8minutes20.studio/borrowedlight).
 
 Do get in touch about a dome material or supplier, about putting a sensor on a
 roof somewhere the network does not yet reach, or about the project generally.
