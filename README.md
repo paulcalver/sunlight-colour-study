@@ -34,7 +34,7 @@ Alone, each colour is almost nothing, your eye quietly edits it away. Together, 
 
 *Colour, arriving from somewhere else.*
 
-A work in progress, and openly so. One sensor has been reading a London sky; others will follow, elsewhere.
+A work in progress, and openly so. One sensor has been reading a London sky; others will follow, elsewhere. What form the standing-inside finally takes, whether light, projection, or something else, is still being explored.
 
 **[8minutes20.studio/borrowedlight](https://8minutes20.studio/borrowedlight)**
 
