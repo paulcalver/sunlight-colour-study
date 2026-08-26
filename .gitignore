@@ -1,0 +1,44 @@
+# macOS
+.DS_Store
+._*
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+
+# Secrets — never commit real credentials
+.env
+*.env
+settings.toml
+secrets.py
+
+# Local database
+*.db
+*.sqlite
+*.sqlite3
+
+# Editors
+.vscode/
+.idea/
+*.swp
+
+# Logs
+*.log
+
+# CAD exports (regenerable from the source scripts)
+*.step
+*.STEP
+*.stp
+*.stl
+*.STL
+*.3mf
+*.f3d
+
+# CIRCUITPY drive cruft
+boot_out.txt
+.fseventsd/
+.metadata_never_index
+.Trashes
