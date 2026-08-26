@@ -26,6 +26,10 @@ The light that leaves the sun is the same white for all of us. Everything that h
 
 Small sensors on rooftops in different parts of the world read the colour of the daylight above them, live. That is the whole mechanism.
 
+![A sensor unit mounted at the top of a pole, seen from below against bright sky — the enclosure with its dome facing up, solar panel angled beneath it, sun and cumulus cloud behind.](media/deployed-prototype-still.jpg)
+
+*A prototype unit in place, dome to the sky.*
+
 Alone, each colour is almost nothing, your eye quietly edits it away. Together, their differences make each one visible, and you find yourself, a little, in places you are not, under the same sun as everyone else. Whether that light can shift your mood, whether one sun landing differently across the world can be felt as well as seen: that is not a question this work answers. It is the question it puts to you, by letting you stand inside it.
 
 *Colour, arriving from somewhere else.*
