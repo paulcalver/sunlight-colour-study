@@ -11,8 +11,8 @@
 > measured.
 >
 > **I am looking for a new supplier for an OBA-free replacement diffuser.** If
-> you make or sell one, or know the material well, please get in touch. Detail
-> in [Status](#status) below.
+> you make or sell one, or know the material well, please [get in
+> touch](#contact). Detail in [Status](#status) below.
 
 ![Borrowed Light — the sun's colours, gathered from many places into one room, moment by moment. Small sensors on rooftops in different parts of the world read the colour of the daylight above them.](media/borrowed-light-poster.jpg)
 
@@ -52,7 +52,7 @@ This cannot be fitted out afterwards, for reasons covered under [Calibration: ph
 
 **So I am looking for a new dome supplier, and this is the open problem the project is on.** The replacement needs to diffuse light with a good cosine response, survive outdoors, and be free of optical brighteners. PTFE is the strongest candidate — it is what real radiometric instruments use as a cosine corrector, precisely because it is UV-stable and spectrally flat — but there appears to be no off-the-shelf curved PTFE dome at this scale, so the likely shape is a flat disc with a separate clear weather cover above it. Nothing is settled yet. Whatever the material, and whatever its marketing claims, every candidate gets tested under a 365nm lamp before it goes anywhere near a sensor: a UV-blocking rating is not a guarantee of being brightener-free.
 
-If you make, sell, or know this kind of material, I would be glad to hear from you.
+If you make, sell, or know this kind of material, I would be glad to [hear from you](#contact).
 
 ## Technical notes
 
@@ -114,6 +114,15 @@ This is also the limit the dome problem ran into. An affine fit can absorb a bia
 Host addresses in `firmware/qt-py/settings.toml.example` are placeholders. Set `MQTT_BROKER`, `MQTT_USERNAME`, `MQTT_PASSWORD` and, if you want over-the-air updates, `OTA_BASE_URL` for your own deployment.
 
 A full build guide — bill of materials, wiring, assembly, print settings — is still to come.
+
+## Contact
+
+**Paul Calver** — [paulcalver@me.com](mailto:paulcalver@me.com)
+
+Project page: [8minutes20.studio/borrowedlight](https://8minutes20.studio/borrowedlight)
+
+Do get in touch about a dome material or supplier, about putting a sensor on a
+roof somewhere the network does not yet reach, or about the project generally.
 
 ## Licence
 
