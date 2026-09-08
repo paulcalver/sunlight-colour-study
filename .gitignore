@@ -28,10 +28,8 @@ secrets.py
 # Logs
 *.log
 
-# CAD exports (regenerable from the source scripts)
-*.step
-*.STEP
-*.stp
+# CAD working files. The published STEP exports under mechanical/ are the
+# deliverable and are tracked deliberately; everything else is local scratch.
 *.stl
 *.STL
 *.3mf

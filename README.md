@@ -2,20 +2,6 @@
 
 *Global Colour: a live network reading the colour of daylight around the world.*
 
-> ### ⚠️ The sensors are currently offline
->
-> The domes fluoresce under sunlight. Optical brighteners in the material absorb
-> ultraviolet and re-emit it as visible blue, pushing colour-temperature readings
-> up to about 1,160K too high — an error invisible indoors and impossible to
-> correct in software, because it tracks ambient UV rather than the light being
-> measured.
->
-> **I am looking for a new supplier for an OBA-free replacement diffuser.** If
-> you make or sell one, or know the material well, please [get in
-> touch](#contact). Detail in [Status](#status) below.
-
-<br>
-
 ![Borrowed Light — the sun's colours, gathered from many places into one room, moment by moment. Small sensors on rooftops in different parts of the world read the colour of the daylight above them.](media/borrowed-light-poster.jpg)
 
 **Borrowed light: the sun's colours, gathered from many places into one room, moment by moment.**
@@ -50,15 +36,17 @@ Hold an identical piece of white paper under the sun in different places and it 
 
 Three units exist. `sensor-00` is the bench reference: it stays indoors permanently and is never deployed, so every future unit can be checked against it rather than against a borrowed meter each time. `sensor-01` is the London unit. `sensor-02` will go somewhere else once there is a site for it.
 
-All three are offline at the moment. Field readings through the summer of 2026 showed a colour-temperature error that tracked ambient UV rather than the light being measured: on the first outdoor comparison against a reference meter, all three units read between 900K and 1,160K too high, consistently, within seconds of each other. Duv barely moved, which is the signature of added blue light rather than a mis-aimed sensor or a bad fit.
+**None of them is in a final position yet.** The units are being rebuilt around new optics, described below, and are running on the bench while that happens. Siting, and a full recalibration once the new stack is fixed, both come after. The photographs here show prototypes in place, not the finished network.
 
-The cause is optical brighteners fluorescing under sunlight — the material absorbs ultraviolet and re-emits it as visible blue, straight into the sensor. A 365nm test in August 2026 confirmed the source: the dome glows strongly, the printed mixing tube behind it only slightly. Studio calibration had been structurally blind to this, because the lamp used for it emits almost no UV. The error only ever appears in real sun.
+### The dome problem, and its fix
 
-This cannot be fitted out afterwards, for reasons covered under [Calibration: physical](#calibration-physical) below. The fix has to be a material change.
+Field readings through the summer of 2026 showed a colour-temperature error that tracked ambient UV rather than the light being measured: on the first outdoor comparison against a reference meter, all three units read between 900K and 1,160K too high, consistently, within seconds of each other. Duv barely moved, which is the signature of added blue light rather than a mis-aimed sensor or a bad fit.
 
-**So I am looking for a new dome supplier, and this is the open problem the project is on.** The replacement needs to diffuse light with a good cosine response, survive outdoors, and be free of optical brighteners. PTFE is the strongest candidate — it is what real radiometric instruments use as a cosine corrector, precisely because it is UV-stable and spectrally flat — but there appears to be no off-the-shelf curved PTFE dome at this scale, so the likely shape is a flat disc with a separate clear weather cover above it. Nothing is settled yet. Whatever the material, and whatever its marketing claims, every candidate gets tested under a 365nm lamp before it goes anywhere near a sensor: a UV-blocking rating is not a guarantee of being brightener-free.
+The cause was optical brighteners fluorescing under sunlight — the material absorbs ultraviolet and re-emits it as visible blue, straight into the sensor. A 365nm test in August 2026 confirmed the source: the dome glowed strongly, the printed mixing tube behind it only slightly. Studio calibration had been structurally blind to this, because the lamp used for it emits almost no UV. The error only ever appeared in real sun.
 
-If you make, sell, or know this kind of material, I would be glad to [hear from you](#contact).
+It could not be fitted out afterwards, for reasons covered under [Calibration: physical](#calibration-physical) below. The fix had to be a material change, and that is now resolved. **LIT Systems**, who make the Lit Duo 1 spectrometer, supplied dome diffusers, UV/IR cutoff filters and black foam mounting rings from their own instrument — known-good parts from a working commercial colour meter rather than another material of unknown provenance. All of them pass the 365nm test. Domes were chosen over the flat diffusers deliberately, to keep the warmth of low sun in the readings rather than have it cosine-weighted away.
+
+The enclosure has been reworked around them, and the printed mixing chamber is gone entirely: the foam ring mounts the filter directly over the OPT4048 and the dome sits close above it, so the light path is dome, filter, sensor, with no white plastic in it anywhere. That second change is not only about fluorescence — white ASA yellows over time, a slow, invisible spectral drift that would quietly invalidate any calibration fit. The files in [`mechanical/`](mechanical/) are this revision.
 
 ## Technical notes
 
@@ -66,7 +54,7 @@ Adafruit QT Py ESP32-S2, OPT4048 tristimulus colour sensor, Voltaic P126 solar p
 
 ![Three views of a sensor unit: the assembled enclosure beside its solar panel, the same unit opened out to show the dome, the stacked boards and the battery sled, and the handheld reference colour meter reading 5417K at +0.005 Duv.](media/prototype_01.jpg)
 
-*Left: an assembled unit with its solar panel. Centre: the same unit opened out — dome and clamp ring, sensor deck, and the sled carrying the microcontroller, fuel gauge and charge controller. Right: the reference colour meter the units are calibrated against.*
+*Left: an assembled unit with its solar panel. Centre: the same unit opened out — dome and clamp ring, sensor deck, and the sled carrying the microcontroller, fuel gauge and charge controller. Right: the reference colour meter the units are calibrated against. This is the earlier flanged-dome build; the clamp ring and mixing tube are gone in the current revision.*
 
 The rest of this page is the long version of that summary.
 
@@ -106,7 +94,7 @@ That reference comes from a direct bench comparison. Two identically built units
 
 The reference unit is never itself installed outdoors, so its own drift stays out of the loop.
 
-This is also the limit the dome problem ran into. An affine fit can absorb a bias that is stable, or one that varies with colour temperature itself, because both are recoverable from the reading. It cannot absorb one driven by ambient UV, which varies independently of the colour being measured, and that is why the fix has to be a material change rather than a better fit.
+This is also the limit the dome problem ran into. An affine fit can absorb a bias that is stable, or one that varies with colour temperature itself, because both are recoverable from the reading. It cannot absorb one driven by ambient UV, which varies independently of the colour being measured, and that is why the fix had to be a material change rather than a better fit.
 
 ---
 
@@ -115,9 +103,10 @@ This is also the limit the dome problem ran into. An affine fit can absorb a bia
     firmware/     CircuitPython for the QT Py ESP32-S2. Reads the OPT4048,
                   derives CCT on-device, publishes over MQTT. Multi-SSID
                   fallback, NTP-aligned capture, optional OTA pull.
-    mechanical/   CadQuery source for the IP65 enclosure, including the pole
-                  and wall-mount brackets. Geometry is derived, not drawn:
-                  change a component and the box follows.
+    mechanical/   STEP exports of the IP65 enclosure and its pole and
+                  wall-mount brackets, built around the LIT Systems dome.
+                  Generated from a parametric model, so geometry is derived
+                  rather than drawn: change a component and the box follows.
     server/       Ingests MQTT, computes Duv and solar position, stores
                   readings, and serves the true-colour views.
 
@@ -131,8 +120,8 @@ A full build guide — bill of materials, wiring, assembly, print settings — i
 
 Project page: [8minutes20.studio/borrowedlight](https://8minutes20.studio/borrowedlight)
 
-Do get in touch about a dome material or supplier, about putting a sensor on a
-roof somewhere the network does not yet reach, or about the project generally.
+Do get in touch about putting a sensor on a roof somewhere the network does not
+yet reach, or about the project generally.
 
 ## Licence
 
