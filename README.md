@@ -1,10 +1,8 @@
-# Borrowed Light
+# Sunlight Colour Study
 
 *Global Colour: a live network reading the colour of daylight around the world.*
 
-![Borrowed Light — the sun's colours, gathered from many places into one room, moment by moment. Small sensors on rooftops in different parts of the world read the colour of the daylight above them.](media/borrowed-light-poster.jpg)
-
-**Borrowed light: the sun's colours, gathered from many places into one room, moment by moment.**
+**Sunlight Colour Study: the sun's colours, gathered from many places into one view, moment by moment.**
 
 The light that leaves the sun is the same white for all of us. Everything that happens to its colour happens here: miles of air, cloud, dust, the haze over a city. The flat grey of a wet afternoon, the warmth before a sunset, the hard clear light of a northern coast, all of it the same sun, met differently.
 
@@ -22,7 +20,7 @@ This work is an exploration of the ever-shifting beauty of the colour of light. 
 
 A work in progress, and openly so. One sensor is reading a London sky now; others will follow, and the grid will widen from one city to many. What form the work finally takes, whether light, projection, or something else, is still being explored.
 
-**[8minutes20.studio/borrowedlight](https://8minutes20.studio/borrowedlight)**
+**[8minutes20.studio/sunlight-colour-study](https://8minutes20.studio/sunlight-colour-study)**
 
 If you would like to hear more about the project's plans and ambitions, please do get in touch.
 
@@ -121,7 +119,7 @@ A full build guide — bill of materials, wiring, assembly, print settings — i
 
 **Paul Calver** — [paulcalver@me.com](mailto:paulcalver@me.com)
 
-Project page: [8minutes20.studio/borrowedlight](https://8minutes20.studio/borrowedlight)
+Project page: [8minutes20.studio/sunlight-colour-study](https://8minutes20.studio/sunlight-colour-study)
 
 Do get in touch about putting a sensor on a roof somewhere the network does not
 yet reach, or about the project generally.
