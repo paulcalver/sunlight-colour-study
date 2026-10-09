@@ -10,17 +10,17 @@ The light that leaves the sun is the same white for all of us. Everything that h
 
 *The quiet natural beauty of light shifting across the world.*
 
-Small sensors on rooftops in different parts of the world read the colour of the daylight above them, live. That is the whole mechanism.
+Small sensors on rooftops in different parts of the world read the colour of the daylight above them. For now there is one, in London, and the days gather on the project page as a grid of cells, played in step so one morning can be watched beside another.
 
 ![A sensor unit mounted at the top of a pole, seen from below against bright sky — the enclosure with its dome facing up, solar panel angled beneath it, sun and cumulus cloud behind.](media/deployed-prototype-still.jpg)
 
 *A prototype unit in place, dome to the sky.*
 
-Alone, each colour is almost nothing, your eye quietly edits it away. Together, their differences make each one visible, and you find yourself, a little, in places you are not, under the same sun as everyone else. Whether that light can shift your mood, whether one sun landing differently across the world can be felt as well as seen: that is not a question this work answers. It is the question it puts to you, by letting you stand inside it.
+This work is an exploration of the ever-shifting beauty of the colour of light. Alone, each colour is almost nothing. Together, their differences make each one visible, first as days, then as places. Whether that light can shift your mood, whether it can be felt as well as seen, is not a question this work answers. It is the question it puts to you.
 
 *Colour, arriving from somewhere else.*
 
-A work in progress, and openly so. One sensor has been reading a London sky; others will follow, elsewhere. What form the standing-inside finally takes, whether light, projection, or something else, is still being explored.
+A work in progress, and openly so. One sensor is reading a London sky now; others will follow, and the grid will widen from one city to many. What form the work finally takes, whether light, projection, or something else, is still being explored.
 
 **[8minutes20.studio/borrowedlight](https://8minutes20.studio/borrowedlight)**
 
@@ -30,13 +30,13 @@ If you would like to hear more about the project's plans and ambitions, please d
 
 ## In plain terms
 
-Hold an identical piece of white paper under the sun in different places and it looks a subtly different colour, not because the paper changes, but because the light falling on it does. The eye compensates for this automatically and mostly hides it; the sensor does not, and records the daylight's actual colour instead. The long-term aim is a distributed network of these sensors, one per site (London first, then elsewhere), each feeding the same live dashboard, so that difference becomes something you can see and compare directly.
+Hold an identical piece of white paper under the sun in different places and it looks a subtly different colour, not because the paper changes, but because the light falling on it does. The eye compensates for this automatically and mostly hides it; the sensor does not, and records the daylight's actual colour instead. The long-term aim is a distributed network of these sensors, one per site (London first, then elsewhere), each adding to the same grid of days, so that difference becomes something you can see and compare directly.
 
 ## Status
 
-Three units exist. `sensor-00` is the bench reference: it stays indoors permanently and is never deployed, so every future unit can be checked against it rather than against a borrowed meter each time. `sensor-01` is the London unit. `sensor-02` will go somewhere else once there is a site for it.
+Three units exist. `sensor-00` is the bench reference: it stays indoors permanently and is never deployed, so every future unit can be checked against it rather than against a borrowed meter each time. `sensor-01` has been on a London rooftop since 6 October 2026, reading the sky every few seconds; each finished day becomes a cell in the grid. `sensor-02` will go somewhere else once there is a site for it.
 
-**None of them is in a final position yet.** The units are being rebuilt around new optics, described below, and are running on the bench while that happens. Siting, and a full recalibration once the new stack is fixed, both come after. The photographs here show prototypes in place, not the finished network.
+**Only one unit is deployed.** All three were rebuilt around the new optics described below and recalibrated in September 2026; `sensor-00` and `sensor-02` are on the bench. What is still to do is an outdoor check of that calibration against the reference meter under real sun, and a site for the next unit. The photographs here show prototypes in place, not the finished network.
 
 ### The dome problem, and its fix
 
@@ -70,45 +70,48 @@ An `OPT4048` tristimulus colour sensor sits behind the dome and diffuser, readin
 
 ### On the device
 
-The microcontroller reads the sensor, takes its `x, y` chromaticity, and derives correlated colour temperature (CCT): the temperature of the blackbody radiator whose colour is the nearest match on the CIE diagram. `cct`, `lux`, `cie_x`, `cie_y`, the raw channel counts, a sensor-overload flag, and battery state are packaged as JSON and published over MQTT to a self-hosted broker.
+The microcontroller reads the sensor, takes its `x, y` chromaticity, and derives correlated colour temperature (CCT): the temperature of the blackbody radiator whose colour is the nearest match on the CIE diagram. `cct`, `lux`, `cie_x`, `cie_y`, the raw channel counts, a sensor-overload flag, and battery state are packaged as JSON and published over MQTT to a self-hosted broker. Readings it cannot send are kept on the device and published later, filed at the time they were taken, and it joins the strongest known Wi-Fi network in range.
 
 ### On the server
 
-CCT alone collapses a two-dimensional colour to a single number along the blackbody curve, discarding the axis perpendicular to it: whether the light sits slightly green or slightly magenta of a true blackbody at that temperature. The server recovers that as **Duv**, computed from the stored `x, y` using the CIE 1960 UCS transform and a closed-form fit to the Planckian locus (Ohno, 2011), accurate to a few parts in 10⁻⁴ across the daylight range. Each reading is also stamped with the sensor's registered location and the sun's elevation and azimuth at that instant, so a colour can be read against time of day and season, not just in isolation.
+CCT alone collapses a two-dimensional colour to a single number along the blackbody curve, discarding the axis perpendicular to it: whether the light sits slightly green or slightly magenta of a true blackbody at that temperature. The server recovers that as **Duv**, computed from the stored `x, y` using the CIE 1960 UCS transform and a closed-form fit to the Planckian locus (Ohno, 2011), accurate to a few parts in 10⁻⁴ across the daylight range. Each reading is also stamped with the sensor's registered location and the sun's elevation and azimuth at that instant, so a colour can be read against time of day and season, not just in isolation. The server also averages readings into ten-minute samples, which is what the project page's grid is built from: one cell per London day, 06:00 to 20:00, each played from a flat first light colour as the day fills in.
 
 ### Colour you see
 
-The colour on the grid and full-screen views is the sensor's measured chromaticity rendered as true colour, not a Kelvin-to-RGB approximation. `x, y` is converted to CIE XYZ at unit luminance, then to linear sRGB with the standard D65 primary matrix. Out-of-gamut negative values are clipped, and the result is normalised so the brightest channel reads full strength, brightness being deliberately discarded here, so the display is a pure colour comparison rather than an exposure match. sRGB gamma is applied and the three channels are rounded to 8 bits, giving the `hex` value.
+The colour in the daily grid and on the debug page is the sensor's measured chromaticity rendered as true colour, not a Kelvin-to-RGB approximation. `x, y` is converted to CIE XYZ at unit luminance, then to linear sRGB with the standard D65 primary matrix. Out-of-gamut negative values are clipped, and the result is normalised so the brightest channel reads full strength, brightness being deliberately discarded here, so the display is a pure colour comparison rather than an exposure match. sRGB gamma is applied and the three channels are rounded to 8 bits, giving the `hex` value.
 
 ### Calibration: computational
 
-The correction is built, but no sensor has been fitted yet, so every CCT, `x, y`, and Duv value shown is still the sensor's raw reading. It is a small per-unit affine adjustment in mireds (10⁶/K, the scale colour-temperature error behaves linearly on) and Duv, fitted once against a trusted physical reference and then applied at ingest, the same stage Duv is already computed at. Raw values are never overwritten: the calibrated columns sit alongside them and stay empty until a fit exists, so a fit can be refined or redone as more reference data comes in without losing anything.
+A correction is fitted per unit against a trusted physical reference and applied at ingest, the same stage Duv is already computed at. Since the September 2026 recalibration it is a 3×3 matrix on the raw CIE `x, y`, not two separate adjustments in mireds and Duv: these sensors' colour-temperature and tint errors interact (their tint response grows at warm colour temperatures), which two independent corrections cannot model. Held-out tests on 21 reference points per unit predict colour temperature to about 30 to 55K on the blackbody locus and Duv to about 0.001, against 135 to 260K and 0.003 to 0.005 for the earlier pair. Raw values are never overwritten: the calibrated columns sit alongside them, so a fit can be refined or redone as more reference data comes in without losing anything.
 
 ### Calibration: physical
 
-That reference comes from a direct bench comparison. Two identically built units, same dome, diffuser, and sensor, are run side by side against a borrowed professional colour meter before either goes outdoors. Once the fit is established:
+That reference comes from a direct comparison indoors, before a unit goes outside. In September 2026 the three units were set under a rented colour-tunable studio light (an ARRI SkyPanel S30-C) and read against the Lit Duo 1 colour meter, stepping through the daylight range of colour temperatures and through green and magenta tints. Once the fit is established:
 
-- one unit deploys to its site,
-- the other stays permanently on the bench as a fixed source of truth, and
+- one unit deploys to its site (`sensor-01`, on 6 October 2026),
+- another stays permanently on the bench as a fixed source of truth, and
 - every future unit gets checked against that bench reference, rather than against the meter each time.
 
 The reference unit is never itself installed outdoors, so its own drift stays out of the loop.
 
-This is also the limit the dome problem ran into. An affine fit can absorb a bias that is stable, or one that varies with colour temperature itself, because both are recoverable from the reading. It cannot absorb one driven by ambient UV, which varies independently of the colour being measured, and that is why the fix had to be a material change rather than a better fit.
+This is also the limit the dome problem ran into. A fit can absorb a bias that is stable, or one that varies with colour temperature itself, because both are recoverable from the reading. It cannot absorb one driven by ambient UV, which varies independently of the colour being measured, and that is why the fix had to be a material change rather than a better fit. A check against the meter under real sun, which the studio light cannot stand in for, is still to be done: it is the test that shows whether the new optics have removed the UV error for good.
 
 ---
 
 ## This repository
 
     firmware/     CircuitPython for the QT Py ESP32-S2. Reads the OPT4048,
-                  derives CCT on-device, publishes over MQTT. Multi-SSID
-                  fallback, NTP-aligned capture, optional OTA pull.
+                  derives CCT on-device, publishes over MQTT. Strongest-network
+                  Wi-Fi with fallbacks, NTP-aligned capture, an offline backlog
+                  sent on reconnect, a remotely settable publish interval, and
+                  optional OTA pull.
     mechanical/   STEP exports of the IP65 enclosure and its pole and
                   wall-mount brackets, built around the LIT Systems dome.
                   Generated from a parametric model, so geometry is derived
                   rather than drawn: change a component and the box follows.
     server/       Ingests MQTT, computes Duv and solar position, stores
-                  readings, and serves the true-colour views.
+                  readings, serves 10-minute samples for the daily grid, and
+                  holds the calibration and diagnostics pages.
 
 Host addresses in `firmware/qt-py/settings.toml.example` are placeholders. Set `MQTT_BROKER`, `MQTT_USERNAME`, `MQTT_PASSWORD` and, if you want over-the-air updates, `OTA_BASE_URL` for your own deployment.
 
