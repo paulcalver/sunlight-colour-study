@@ -1,7 +1,5 @@
 # Sunlight Colour Study
 
-*Global Colour: a live network reading the colour of daylight around the world.*
-
 **Sunlight Colour Study: the sun's colours, gathered from many places into one view, moment by moment.**
 
 The light that leaves the sun is the same white for all of us. Everything that happens to its colour happens here: miles of air, cloud, dust, the haze over a city. The flat grey of a wet afternoon, the warmth before a sunset, the hard clear light of a northern coast, all of it the same sun, met differently.
