@@ -13,10 +13,11 @@ Then open http://localhost:8000 in your browser.
 
 import math
 import os
+import socket
 import sqlite3
 import json
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 from zoneinfo import ZoneInfo
 
@@ -38,14 +39,25 @@ MQTT_PORT = int(os.environ.get("MQTT_PORT", "1883"))
 MQTT_USERNAME = os.environ.get("MQTT_USERNAME")
 MQTT_PASSWORD = os.environ.get("MQTT_PASSWORD")
 MQTT_TOPIC = "cct-sensor/#"  # subscribes to all sensor IDs underneath
+# Store-and-forward batches: readings a unit took while it couldn't reach the
+# broker, sent later, each row stamped with the device's own clock. A separate
+# prefix (not cct-sensor/<id>/...) because the colour display subscribes to
+# cct-sensor/# and treats every message there as the current colour.
+MQTT_BACKLOG_TOPIC = "cct-backlog/#"
+# How far a device timestamp may sit from the server's clock and still be used.
+# Live readings arrive within seconds, so a wide gap means the device clock is
+# wrong and the receive time is safer; backlog rows are old by design.
+LIVE_TS_TOLERANCE = timedelta(minutes=10)
+BACKLOG_MAX_AGE = timedelta(days=30)
+BACKLOG_MAX_FUTURE = timedelta(minutes=2)
 
 DB_PATH = os.path.join(os.path.dirname(__file__), "readings.db")
 
 # Over-the-air firmware: the device pulls new code.py from here on its next
 # check, so flashing works from anywhere (no home-network access needed) — the
-# device makes the outbound call, nothing connects in to it. Stage a code.py
-# and a manifest.json in FIRMWARE_DIR below; they are served over the existing
-# HTTPS/Nginx setup, so there is no new firewall/port to open. If OTA_TOKEN is set, both routes
+# device makes the outbound call, nothing connects in to it. Files are staged
+# with publish_firmware.py and served over the existing HTTPS/Nginx setup, so
+# there is no new firewall/port to open. If OTA_TOKEN is set, both routes
 # require a matching ?token=; leave it unset to serve the firmware openly.
 FIRMWARE_DIR = os.path.join(os.path.dirname(__file__), "firmware")
 OTA_TOKEN = os.environ.get("OTA_TOKEN")
@@ -60,8 +72,8 @@ CALIBRATION_TOKEN = os.environ.get("CALIBRATION_TOKEN")
 
 # Below this lux the measured chromaticity is unreliable (noise near the
 # sensor's floor), so colour aggregates exclude these readings. Matches
-# LUX_FLOOR in the frontend (static/main.js, debug.html), which greys such
-# cells rather than painting noise as a vivid colour.
+# LUX_FLOOR in the frontend (debug.html), which greys such cells rather
+# than painting noise as a vivid colour.
 DISPLAY_LUX_FLOOR = 1.0
 
 
@@ -175,6 +187,14 @@ def init_db():
         )
         """
     )
+    # 3x3 colour-correction matrix on raw chromaticity (see fit_ccm), stored as
+    # a JSON list of 9 numbers. When present it replaces the affine pair above
+    # for this sensor; NULL means the affine pair is the correction (too few
+    # points for a matrix, or a fit made before this column existed).
+    try:
+        conn.execute("ALTER TABLE calibration ADD COLUMN ccm TEXT")
+    except sqlite3.OperationalError:
+        pass  # column already exists
 
     # The captured reference pairs a fit is built from: one row per reference
     # reading (either the meter, or another already-calibrated sensor), paired
@@ -206,6 +226,13 @@ def init_db():
         conn.execute("ALTER TABLE calibration_points ADD COLUMN ref_source TEXT")
     except sqlite3.OperationalError:
         pass  # column already exists
+    # Backlog ingest checks (sensor_id, timestamp) for every row it inserts, so
+    # a batch re-sent after a lost ack doesn't double up. Also serves the
+    # per-sensor time-range reads in /api/history and /api/frames. Building it
+    # the first time on a large table takes a few seconds at startup.
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_readings_sensor_ts ON readings (sensor_id, timestamp)"
+    )
     conn.commit()
     conn.close()
 
@@ -361,6 +388,141 @@ def apply_calibration(cct, duv_raw, coeffs):
     return cct_cal, duv_cal, cie_x_cal, cie_y_cal
 
 
+# A 3x3 matrix has 8 free parameters, so it needs well over 8 points spread
+# across both axes (CCT and tint) to be trusted; below this the affine pair
+# stays the correction.
+MIN_MATRIX_POINTS = 12
+
+
+def _solve_linear(a, b):
+    """Solve a small dense system a.x = b by Gaussian elimination with partial
+    pivoting (no numpy on the Droplet). Raises ValueError if singular."""
+    n = len(b)
+    m = [row[:] + [b[i]] for i, row in enumerate(a)]
+    for col in range(n):
+        piv = max(range(col, n), key=lambda r: abs(m[r][col]))
+        if abs(m[piv][col]) < 1e-15:
+            raise ValueError("singular system")
+        m[col], m[piv] = m[piv], m[col]
+        for r in range(col + 1, n):
+            f = m[r][col] / m[col][col]
+            for c in range(col, n + 1):
+                m[r][c] -= f * m[col][c]
+    x = [0.0] * n
+    for r in range(n - 1, -1, -1):
+        x[r] = (m[r][n] - sum(m[r][c] * x[c] for c in range(r + 1, n))) / m[r][r]
+    return x
+
+
+def fit_ccm(src, dst):
+    """Least-squares 3x3 colour-correction matrix mapping raw chromaticity to
+    reference chromaticity, as a projective transform of CIE xy:
+
+        [X, Y, W] = H . [x, y, 1],   x_cal = X / W,   y_cal = Y / W
+
+    This is a full 3x3 correction of the sensor's XYZ, seen in chromaticity
+    (brightness divides out). Unlike the affine pair it captures the sensor's
+    CCT and tint errors interacting -- found 2026-09-28: the tint response
+    grows at low CCT, which no separate CCT/Duv correction can model.
+    Leave-one-out on that session's 21 SkyPanel points per unit: ~30-50 K
+    on-locus and ~0.001 Duv, vs ~140-260 K and ~0.003-0.005 for the affine
+    pair. h33 is fixed at 1; coordinates are centred and scaled first to keep
+    the normal equations well conditioned. Returns the 9 entries row-major.
+    """
+    n = len(src)
+    cx = sum(p[0] for p in src) / n
+    cy = sum(p[1] for p in src) / n
+    s = max(max(abs(p[0] - cx), abs(p[1] - cy)) for p in src) or 1.0
+    ata = [[0.0] * 8 for _ in range(8)]
+    atb = [0.0] * 8
+    for (x, y), (xr, yr) in zip(src, dst):
+        u, v = (x - cx) / s, (y - cy) / s
+        for row, rhs in (([u, v, 1, 0, 0, 0, -xr * u, -xr * v], xr),
+                         ([0, 0, 0, u, v, 1, -yr * u, -yr * v], yr)):
+            for i in range(8):
+                atb[i] += row[i] * rhs
+                for j in range(8):
+                    ata[i][j] += row[i] * row[j]
+    h = _solve_linear(ata, atb) + [1.0]
+    # Fold the centring/scaling back in so the stored matrix takes raw x, y:
+    # H_raw = H_norm . T, with T mapping (x, y, 1) to (u, v, 1).
+    t = [[1 / s, 0, -cx / s], [0, 1 / s, -cy / s], [0, 0, 1]]
+    hm = [h[0:3], h[3:6], h[6:9]]
+    raw = [[sum(hm[i][k] * t[k][j] for k in range(3)) for j in range(3)] for i in range(3)]
+    return [v for row in raw for v in row]
+
+
+def apply_ccm(ccm, x, y):
+    """Corrected (x, y) from raw (x, y) through a stored matrix, or (None, None)."""
+    if x is None or y is None:
+        return None, None
+    w = ccm[6] * x + ccm[7] * y + ccm[8]
+    if w == 0:
+        return None, None
+    return (ccm[0] * x + ccm[1] * y + ccm[2]) / w, (ccm[3] * x + ccm[4] * y + ccm[5]) / w
+
+
+def cct_duv_from_xy(x, y):
+    """CCT and Duv of a chromaticity against the Krystek locus -- the exact
+    inverse of xy_from_cct_duv, so a matrix-corrected reading and the
+    reference it was fitted to are measured on the same curve.
+
+    Newton-style projection onto the locus, started from McCamy's CCT: step
+    along the local tangent by the offset's component along it. Converges in a
+    few iterations across 1500-25000 K. Returns (None, None) outside that range
+    or for a degenerate chromaticity.
+    """
+    denom = -2.0 * x + 12.0 * y + 3.0
+    if denom == 0 or (0.1858 - y) == 0:
+        return None, None
+    u, v = 4.0 * x / denom, 6.0 * y / denom
+    nmc = (x - 0.3320) / (0.1858 - y)
+    t = 449.0 * nmc ** 3 + 3525.0 * nmc ** 2 + 6823.3 * nmc + 5520.33
+    t = min(max(t, 1500.0), 25000.0)
+    for _ in range(30):
+        u0, v0 = planckian_locus_uv(t)
+        u1, v1 = planckian_locus_uv(t + 1.0)
+        du, dv = u1 - u0, v1 - v0
+        step = ((u - u0) * du + (v - v0) * dv) / (du * du + dv * dv)
+        t = min(max(t + step, 1000.0), 30000.0)
+        if abs(step) < 0.01:
+            break
+    if not 1500.0 <= t <= 25000.0:
+        return None, None
+    u0, v0 = planckian_locus_uv(t)
+    u1, v1 = planckian_locus_uv(t + 1.0)
+    du, dv = u1 - u0, v1 - v0
+    tl = math.hypot(du, dv)
+    # Signed so positive = greenish, matching xy_from_cct_duv / compute_duv.
+    duv = ((u - u0) * dv - (v - v0) * du) / tl
+    return t, duv
+
+
+def apply_fit(fit, cct, duv_raw, cie_x, cie_y):
+    """Apply a sensor's stored calibration row (mired_a, mired_b, duv_c, duv_d,
+    ccm) to one reading. Uses the matrix when the fit has one, else the affine
+    pair. Returns (cct_cal, duv_cal, cie_x_cal, cie_y_cal)."""
+    mired_a, mired_b, duv_c, duv_d, ccm = fit
+    if ccm:
+        if isinstance(ccm, str):
+            ccm = json.loads(ccm)
+        # Night heartbeats and dark readings carry no usable colour; keep them
+        # NULL like the affine path does when the device reports no CCT.
+        if cct is None or cct <= 0:
+            return None, None, None, None
+        x_cal, y_cal = apply_ccm(ccm, cie_x, cie_y)
+        if x_cal is None:
+            return None, None, None, None
+        cct_cal, duv_cal = cct_duv_from_xy(x_cal, y_cal)
+        if cct_cal is None:
+            return None, None, None, None
+        return cct_cal, duv_cal, x_cal, y_cal
+    return apply_calibration(cct, duv_raw, (mired_a, mired_b, duv_c, duv_d))
+
+
+FIT_COLUMNS = "mired_a, mired_b, duv_c, duv_d, ccm"
+
+
 def parse_db_timestamp(ts):
     """Parse a stored `timestamp` value into a UTC-aware datetime.
 
@@ -383,15 +545,45 @@ def to_local(ts_utc_iso, timezone_name):
     return parse_db_timestamp(ts_utc_iso).astimezone(ZoneInfo(timezone_name))
 
 
-def store_reading(data: dict):
-    conn = sqlite3.connect(DB_PATH)
+def reading_time(data: dict, backlog: bool = False):
+    """The UTC instant to file a reading under, or None to reject a backlog row.
+
+    Firmware from 2026-09-24 sends `ts` (Unix seconds from its NTP-set clock)
+    with every reading. A live reading uses it if it is within
+    LIVE_TS_TOLERANCE of now (so a reading published a few seconds late, e.g.
+    right after a Wi-Fi rejoin, still lands when it was taken), else falls
+    back to the receive time, which is also what older firmware without `ts`
+    gets. A backlog row has no receive-time fallback -- it is old by design --
+    so one without a sane `ts` is rejected.
+    """
+    now = datetime.now(timezone.utc)
+    ts = data.get("ts")
+    try:
+        device = datetime.fromtimestamp(int(ts), timezone.utc) if ts not in (None, "") else None
+    except (TypeError, ValueError, OverflowError, OSError):
+        device = None
+    if backlog:
+        if device is None or not (now - BACKLOG_MAX_AGE <= device <= now + BACKLOG_MAX_FUTURE):
+            return None
+        return device
+    if device is not None and abs(device - now) <= LIVE_TS_TOLERANCE:
+        return device
+    return now
+
+
+def store_reading(data: dict, when: Optional[datetime] = None, conn=None):
+    """Insert one reading. `when` defaults to reading_time(data); pass `conn`
+    to batch several inserts into one transaction (the caller then commits)."""
+    own_conn = conn is None
+    if own_conn:
+        conn = sqlite3.connect(DB_PATH)
 
     sensor_id = data.get("sensor_id", "unknown")
 
-    # Stamp the instant once, in Python, so the same UTC time is used for both
-    # the stored timestamp and the solar maths. Format matches the old
-    # datetime('now') rows so history stays uniform.
-    now = datetime.now(timezone.utc)
+    # Fix the instant once so the same UTC time is used for both the stored
+    # timestamp and the solar maths. Format matches the old datetime('now')
+    # rows so history stays uniform.
+    now = when or reading_time(data)
     timestamp = now.strftime("%Y-%m-%d %H:%M:%S")
 
     # Look up where this unit sits. If it has not been registered yet, location
@@ -413,12 +605,13 @@ def store_reading(data: dict):
     # If this sensor has a fitted calibration, also store the corrected
     # cct/duv/chromaticity alongside the raw values -- never in place of them.
     cct_cal = duv_cal = cie_x_cal = cie_y_cal = None
-    coeffs = conn.execute(
-        "SELECT mired_a, mired_b, duv_c, duv_d FROM calibration WHERE sensor_id = ?",
+    fit = conn.execute(
+        f"SELECT {FIT_COLUMNS} FROM calibration WHERE sensor_id = ?",
         (sensor_id,),
     ).fetchone()
-    if coeffs is not None:
-        cct_cal, duv_cal, cie_x_cal, cie_y_cal = apply_calibration(cct_raw, duv, coeffs)
+    if fit is not None:
+        cct_cal, duv_cal, cie_x_cal, cie_y_cal = apply_fit(
+            fit, cct_raw, duv, data.get("cie_x"), data.get("cie_y"))
 
     conn.execute(
         """
@@ -450,8 +643,59 @@ def store_reading(data: dict):
             solar_azimuth,
         ),
     )
-    conn.commit()
-    conn.close()
+    if own_conn:
+        conn.commit()
+        conn.close()
+
+
+def _to_float(v):
+    try:
+        return float(v) if v not in (None, "") else None
+    except (TypeError, ValueError):
+        return None
+
+
+def store_backlog(batch: dict):
+    """Insert a store-and-forward batch; returns (inserted, skipped).
+
+    Payload: {"sensor_id", "fields": [...], "csv": "row\nrow..."}, one CSV row
+    per reading, fields in the order given (the first is always `ts`). Rows
+    already on file for this sensor at the same second are skipped, which is
+    what makes a re-sent batch harmless; rows with no usable `ts` are dropped.
+    One transaction per batch.
+    """
+    sensor_id = batch.get("sensor_id") or "unknown"
+    fields = batch.get("fields") or []
+    inserted = skipped = 0
+    # Generous lock timeout: a batch lost to "database is locked" is already
+    # acknowledged, so it is gone for good.
+    conn = sqlite3.connect(DB_PATH, timeout=30)
+    try:
+        for line in (batch.get("csv") or "").splitlines():
+            values = line.strip().split(",")
+            if len(values) != len(fields):
+                skipped += 1
+                continue
+            row = dict(zip(fields, values))
+            data = {k: _to_float(v) for k, v in row.items() if k != "ts"}
+            data["ts"] = row.get("ts")
+            data["sensor_id"] = sensor_id
+            when = reading_time(data, backlog=True)
+            if when is None:
+                skipped += 1
+                continue
+            if conn.execute(
+                "SELECT 1 FROM readings WHERE sensor_id = ? AND timestamp = ? LIMIT 1",
+                (sensor_id, when.strftime("%Y-%m-%d %H:%M:%S")),
+            ).fetchone():
+                skipped += 1
+                continue
+            store_reading(data, when=when, conn=conn)
+            inserted += 1
+        conn.commit()
+    finally:
+        conn.close()
+    return inserted, skipped
 
 
 def register_sensor(conn, sensor_id, label, latitude, longitude, timezone_name,
@@ -669,100 +913,122 @@ def remove_calibration_point(conn, point_id):
 
 
 def fit_calibration(conn, sensor_id, notes=None):
-    """Fit both affine corrections from this sensor's captured calibration
-    points and upsert the result into the `calibration` table. Re-running
-    this (e.g. after adding more points) simply replaces the previous fit --
-    it does not touch already-stored readings, see backfill_calibration for
-    that. Raises ValueError if no points have been captured yet.
+    """Fit this sensor's correction from its captured calibration points and
+    upsert it into the `calibration` table. Re-running this (e.g. after adding
+    more points) simply replaces the previous fit -- it does not touch
+    already-stored readings, see backfill_calibration for that. Raises
+    ValueError if no points have been captured yet.
+
+    Meter points take precedence: if the sensor has any, peer points
+    (ref_source = another sensor) are left out, so a peer cross-check can sit
+    in the table as an audit record without being folded into the fit. A
+    sensor with no meter points is fitted from its peer points.
+
+    The affine pair (mireds + Duv) is always fitted. With MIN_MATRIX_POINTS or
+    more points the 3x3 matrix is fitted too and becomes the correction (see
+    fit_ccm); the reported RMS is for whichever model is in use.
     """
     rows = conn.execute(
-        "SELECT cct_raw, duv_raw, cct_ref, duv_ref FROM calibration_points "
-        "WHERE sensor_id = ?",
+        "SELECT cct_raw, duv_raw, cie_x, cie_y, cct_ref, duv_ref, ref_source "
+        "FROM calibration_points WHERE sensor_id = ?",
         (sensor_id,),
     ).fetchall()
     if not rows:
         raise ValueError(f"no calibration points captured for {sensor_id!r}")
+    # NULL ref_source rows predate peer calibration and are all meter points.
+    meter = [r for r in rows if r[6] in (None, "meter")]
+    used = meter or rows
+    excluded = len(rows) - len(used)
 
-    mired_raw = [1e6 / r[0] for r in rows]
-    mired_ref = [1e6 / r[2] for r in rows]
-    duv_raw = [r[1] for r in rows]
-    duv_ref = [r[3] for r in rows]
+    mired_a, mired_b, _ = fit_linear([1e6 / r[0] for r in used], [1e6 / r[4] for r in used])
+    duv_c, duv_d, _ = fit_linear([r[1] for r in used], [r[5] for r in used])
 
-    mired_a, mired_b, _ = fit_linear(mired_raw, mired_ref)
-    duv_c, duv_d, rms_duv = fit_linear(duv_raw, duv_ref)
+    ccm = None
+    if len(used) >= MIN_MATRIX_POINTS and all(r[2] is not None and r[3] is not None for r in used):
+        ccm = fit_ccm([(r[2], r[3]) for r in used],
+                      [xy_from_cct_duv(r[4], r[5]) for r in used])
 
     # Report the fit-time residual in Kelvin (the unit anyone reading this
-    # will actually think in) rather than mireds, by applying the just-fitted
-    # correction back to each point and diffing against the meter directly --
-    # mired error doesn't convert to Kelvin error by a fixed factor.
-    k_residuals = []
-    for cct_raw_i, _, cct_ref_i, _ in rows:
-        cct_cal_i, _, _, _ = apply_calibration(cct_raw_i, None, (mired_a, mired_b, 0, 0))
+    # will actually think in) by applying the just-fitted correction back to
+    # each point and diffing against the reference directly.
+    fit = (mired_a, mired_b, duv_c, duv_d, ccm)
+    k_res, d_res = [], []
+    for cct_raw_i, duv_raw_i, x_i, y_i, cct_ref_i, duv_ref_i, _ in used:
+        cct_cal_i, duv_cal_i, _, _ = apply_fit(fit, cct_raw_i, duv_raw_i, x_i, y_i)
         if cct_cal_i is not None:
-            k_residuals.append(cct_ref_i - cct_cal_i)
-    rms_cct = (
-        math.sqrt(sum(r * r for r in k_residuals) / len(k_residuals))
-        if k_residuals else None
-    )
+            k_res.append(cct_ref_i - cct_cal_i)
+        if duv_cal_i is not None:
+            d_res.append(duv_ref_i - duv_cal_i)
+    rms_cct = math.sqrt(sum(r * r for r in k_res) / len(k_res)) if k_res else None
+    rms_duv = math.sqrt(sum(r * r for r in d_res) / len(d_res)) if d_res else None
 
     fitted_at = datetime.now(timezone.utc).isoformat()
     conn.execute(
         """
         INSERT INTO calibration
-            (sensor_id, mired_a, mired_b, duv_c, duv_d, n_points,
+            (sensor_id, mired_a, mired_b, duv_c, duv_d, ccm, n_points,
              rms_cct, rms_duv, fitted_at, notes)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(sensor_id) DO UPDATE SET
             mired_a=excluded.mired_a, mired_b=excluded.mired_b,
-            duv_c=excluded.duv_c, duv_d=excluded.duv_d,
+            duv_c=excluded.duv_c, duv_d=excluded.duv_d, ccm=excluded.ccm,
             n_points=excluded.n_points, rms_cct=excluded.rms_cct,
             rms_duv=excluded.rms_duv, fitted_at=excluded.fitted_at,
             notes=excluded.notes
         """,
-        (sensor_id, mired_a, mired_b, duv_c, duv_d, len(rows),
+        (sensor_id, mired_a, mired_b, duv_c, duv_d,
+         json.dumps(ccm) if ccm else None, len(used),
          rms_cct, rms_duv, fitted_at, notes),
     )
     conn.commit()
     return {
         "sensor_id": sensor_id,
-        "n_points": len(rows),
+        "model": "matrix" if ccm else "affine",
+        "n_points": len(used),
+        "n_excluded_peer_points": excluded,
         "mired_a": mired_a, "mired_b": mired_b,
         "duv_c": duv_c, "duv_d": duv_d,
+        "ccm": ccm,
         "rms_cct": rms_cct, "rms_duv": rms_duv,
     }
 
 
 def backfill_calibration(conn, sensor_id):
     """Recompute cct_cal/duv_cal/cie_x_cal/cie_y_cal for every stored reading
-    of one sensor from its current `calibration` coefficients.
+    of one sensor from its current `calibration` row.
 
     Unlike backfill_solar/backfill_duv this recomputes unconditionally rather
     than only filling NULLs, because a re-fit (more points added later) must
     update history, not just gaps. Raises ValueError if the sensor has no fit
     yet. Returns the number of rows updated.
     """
-    coeffs = conn.execute(
-        "SELECT mired_a, mired_b, duv_c, duv_d FROM calibration WHERE sensor_id = ?",
+    fit = conn.execute(
+        f"SELECT {FIT_COLUMNS} FROM calibration WHERE sensor_id = ?",
         (sensor_id,),
     ).fetchone()
-    if coeffs is None:
+    if fit is None:
         raise ValueError(f"{sensor_id!r} has no calibration fit yet")
+    fit = fit[:4] + ((json.loads(fit[4]) if fit[4] else None),)
     rows = conn.execute(
-        "SELECT id, cct, duv FROM readings WHERE sensor_id = ?",
+        "SELECT id, cct, duv, cie_x, cie_y FROM readings WHERE sensor_id = ?",
         (sensor_id,),
     ).fetchall()
-    for row_id, cct, duv in rows:
-        cct_cal, duv_cal, cie_x_cal, cie_y_cal = apply_calibration(cct, duv, coeffs)
-        conn.execute(
-            "UPDATE readings SET cct_cal = ?, duv_cal = ?, cie_x_cal = ?, cie_y_cal = ? WHERE id = ?",
-            (
+
+    def updates():
+        for row_id, cct, duv, cie_x, cie_y in rows:
+            cct_cal, duv_cal, cie_x_cal, cie_y_cal = apply_fit(fit, cct, duv, cie_x, cie_y)
+            yield (
                 round(cct_cal, 1) if cct_cal is not None else None,
                 round(duv_cal, 5) if duv_cal is not None else None,
                 round(cie_x_cal, 4) if cie_x_cal is not None else None,
                 round(cie_y_cal, 4) if cie_y_cal is not None else None,
                 row_id,
-            ),
-        )
+            )
+
+    conn.executemany(
+        "UPDATE readings SET cct_cal = ?, duv_cal = ?, cie_x_cal = ?, cie_y_cal = ? WHERE id = ?",
+        updates(),
+    )
     conn.commit()
     return len(rows)
 
@@ -782,12 +1048,22 @@ def on_connect(client, userdata, flags, reason_code, properties=None):
     print(f"Connected to MQTT broker (reason code: {reason_code})")
     client.subscribe(MQTT_TOPIC)
     print(f"Subscribed to: {MQTT_TOPIC}")
+    # QoS 1 so the broker holds the device to its acknowledged delivery all the
+    # way through; the device only deletes a batch once its PUBACK arrives.
+    client.subscribe(MQTT_BACKLOG_TOPIC, qos=1)
+    print(f"Subscribed to: {MQTT_BACKLOG_TOPIC}")
 
 
 def on_message(client, userdata, msg):
     global _last_sensor_id
     try:
         data = json.loads(msg.payload.decode())
+        if msg.topic.startswith("cct-backlog/"):
+            # Old readings: stored at their own time, but never shown as the
+            # sensor's live diagnostics.
+            inserted, skipped = store_backlog(data)
+            print(f"Backlog from {data.get('sensor_id')}: {inserted} stored, {skipped} skipped")
+            return
         store_reading(data)
         sensor_id = data.get("sensor_id", "unknown")
         latest_payloads[sensor_id] = data
@@ -798,7 +1074,17 @@ def on_message(client, userdata, msg):
 
 
 def build_mqtt_client():
-    client = mqtt.Client(callback_api_version=mqtt.CallbackAPIVersion.VERSION2)
+    # A persistent session (fixed client id, clean_session=False) makes the
+    # broker hold QoS 1 backlog batches while this backend is down or
+    # restarting. Without it the broker would still PUBACK the device -- which
+    # then deletes the batch -- and drop the message on the floor. The id is
+    # per machine so a local dev run can never take over the Droplet's session.
+    client_id = os.environ.get("MQTT_CLIENT_ID") or f"cct-backend-{socket.gethostname()}"
+    client = mqtt.Client(
+        callback_api_version=mqtt.CallbackAPIVersion.VERSION2,
+        client_id=client_id,
+        clean_session=False,
+    )
     if MQTT_USERNAME and MQTT_PASSWORD:
         client.username_pw_set(MQTT_USERNAME, MQTT_PASSWORD)
     client.on_connect = on_connect
@@ -991,10 +1277,12 @@ def get_frames(
     `start`/`end` (UTC "YYYY-MM-DD HH:MM:SS", inclusive) scope the query to a
     single daylight window; omit to bucket the whole table.
 
-    Colour fields (cct, cie_x, cie_y, duv) average only over readings above
-    DISPLAY_LUX_FLOOR, matching /api/hourly, so night/dusk noise below the
-    sensor's floor doesn't pollute a frame's colour. Lux and sample count keep
-    every reading.
+    Colour fields (cct, cie_x, cie_y, duv, and their _cal counterparts) average
+    only over readings above DISPLAY_LUX_FLOOR, matching /api/hourly, so
+    night/dusk noise below the sensor's floor doesn't pollute a frame's colour
+    -- a bucket with no reading above the floor comes back with those fields
+    NULL rather than a misleading near-black average. Lux and sample count
+    keep every reading.
     """
     bucket_s = max(1, int(bucket))
     conn = sqlite3.connect(DB_PATH)
@@ -1018,6 +1306,10 @@ def get_frames(
         f"ROUND(AVG(CASE WHEN lux >= {DISPLAY_LUX_FLOOR} THEN cie_x END), 4) AS cie_x, "
         f"ROUND(AVG(CASE WHEN lux >= {DISPLAY_LUX_FLOOR} THEN cie_y END), 4) AS cie_y, "
         f"ROUND(AVG(CASE WHEN lux >= {DISPLAY_LUX_FLOOR} THEN duv END), 5) AS duv, "
+        f"ROUND(AVG(CASE WHEN lux >= {DISPLAY_LUX_FLOOR} THEN cct_cal END), 1) AS cct_cal, "
+        f"ROUND(AVG(CASE WHEN lux >= {DISPLAY_LUX_FLOOR} THEN duv_cal END), 5) AS duv_cal, "
+        f"ROUND(AVG(CASE WHEN lux >= {DISPLAY_LUX_FLOOR} THEN cie_x_cal END), 4) AS cie_x_cal, "
+        f"ROUND(AVG(CASE WHEN lux >= {DISPLAY_LUX_FLOOR} THEN cie_y_cal END), 4) AS cie_y_cal, "
         "COUNT(*) AS samples "
         f"FROM readings {where_sql} "
         "GROUP BY bucket_start ORDER BY bucket_start",
@@ -1158,29 +1450,11 @@ def firmware_code(token: Optional[str] = None):
 
 @app.get("/")
 def index():
-    """The public full-screen colour view (eases between readings)."""
+    """Just a small "8 Minutes 20" text link (top-left, styled to match
+    8minutes20.studio) back to the main site -- everything else on this
+    domain is /debug (see 2026-09-17: the old p5.js full-screen colour view
+    that used to live here, and main.js it depended on, are retired)."""
     return FileResponse(os.path.join(os.path.dirname(__file__), "static", "index.html"))
-
-
-@app.get("/grid")
-def grid():
-    """Legacy single-sensor grid URL. grid.js falls back to sensor-01 for any
-    path it doesn't recognise, so this now shows sensor-01 only (previously it
-    mixed every sensor's readings into one grid) — kept for old links/bookmarks;
-    prefer /grid-sensor-01 or /grid-sensor-02 going forward."""
-    return FileResponse(os.path.join(os.path.dirname(__file__), "static", "grid.html"))
-
-
-@app.get("/grid-sensor-01")
-def grid_sensor_01():
-    """The tiled p5.js grid visualisation, scoped to sensor-01 only."""
-    return FileResponse(os.path.join(os.path.dirname(__file__), "static", "grid.html"))
-
-
-@app.get("/grid-sensor-02")
-def grid_sensor_02():
-    """The tiled p5.js grid visualisation, scoped to sensor-02 only."""
-    return FileResponse(os.path.join(os.path.dirname(__file__), "static", "grid.html"))
 
 
 @app.get("/debug")

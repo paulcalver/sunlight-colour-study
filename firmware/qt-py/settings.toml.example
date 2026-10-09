@@ -7,13 +7,19 @@
 CIRCUITPY_WIFI_SSID = "your-wifi-name"
 CIRCUITPY_WIFI_PASSWORD = "your-wifi-password"
 
-# Optional fallback networks, tried by code.py in order if the primary is
-# unreachable (e.g. a phone hotspot as primary, home WiFi as backup). Leave
-# unset for a single-network setup. _3 is also supported.
-# CIRCUITPY_WIFI_SSID_2 = "backup-wifi-name"
-# CIRCUITPY_WIFI_PASSWORD_2 = "backup-wifi-password"
+# Optional fallback networks, tried by code.py in slot order if the primary is
+# unreachable (office, studio, phone hotspot...). Slots _2, _3 and _4 are
+# supported; unset ones are skipped, so a single-network setup needs none of
+# them. Put the hotspot last -- it is the slowest slot to fail when out of
+# range, so anything ahead of it gets found sooner.
+# CIRCUITPY_WIFI_SSID_2 = "office-wifi-name"
+# CIRCUITPY_WIFI_PASSWORD_2 = "office-wifi-password"
+# CIRCUITPY_WIFI_SSID_3 = "studio-wifi-name"
+# CIRCUITPY_WIFI_PASSWORD_3 = "studio-wifi-password"
+# CIRCUITPY_WIFI_SSID_4 = "hotspot-name"
+# CIRCUITPY_WIFI_PASSWORD_4 = "hotspot-password"
 
-MQTT_BROKER = "broker.example.com"        # your broker host or IP
+MQTT_BROKER = "broker.example.com"
 MQTT_USERNAME = "feather"
 MQTT_PASSWORD = "your-mqtt-password"
 

@@ -82,6 +82,7 @@ Run with no arguments (or -h) for the full option list on any subcommand.
 
 import argparse
 import sqlite3
+import json
 import sys
 from datetime import datetime, timezone
 
@@ -174,9 +175,16 @@ def cmd_fit(args):
     finally:
         conn.close()
 
-    print(f"Fitted {args.sensor_id!r} from {result['n_points']} point(s):")
-    print(f"  mireds:  cal = {result['mired_a']:.4f} * raw + {result['mired_b']:.2f}")
-    print(f"  duv:     cal = {result['duv_c']:.4f} * raw + {result['duv_d']:.5f}")
+    print(f"Fitted {args.sensor_id!r} from {result['n_points']} point(s), "
+          f"model: {result['model']}:")
+    if result["n_excluded_peer_points"]:
+        print(f"  ({result['n_excluded_peer_points']} peer point(s) left out -- meter points take precedence)")
+    if result["ccm"]:
+        print("  3x3 matrix on raw xy: " + ", ".join(f"{v:.5g}" for v in result["ccm"]))
+    print(f"  mireds:  cal = {result['mired_a']:.4f} * raw + {result['mired_b']:.2f}"
+          + ("  (fallback only)" if result["ccm"] else ""))
+    print(f"  duv:     cal = {result['duv_c']:.4f} * raw + {result['duv_d']:.5f}"
+          + ("  (fallback only)" if result["ccm"] else ""))
     if result["rms_cct"] is not None:
         print(f"  RMS residual: {result['rms_cct']:.1f} K, {result['rms_duv']:.5f} Duv")
     print(f"Backfilled {filled} historical reading(s).")
@@ -199,8 +207,12 @@ def cmd_show(args):
 
     if coeffs:
         print(f"Calibration for {args.sensor_id!r} (fitted {coeffs['fitted_at']}):")
-        print(f"  mireds: cal = {coeffs['mired_a']:.4f} * raw + {coeffs['mired_b']:.2f}")
-        print(f"  duv:    cal = {coeffs['duv_c']:.4f} * raw + {coeffs['duv_d']:.5f}")
+        if coeffs["ccm"]:
+            print("  model: 3x3 matrix on raw xy: " + ", ".join(f"{v:.5g}" for v in json.loads(coeffs["ccm"])))
+        print(f"  mireds: cal = {coeffs['mired_a']:.4f} * raw + {coeffs['mired_b']:.2f}"
+              + ("  (fallback only)" if coeffs["ccm"] else ""))
+        print(f"  duv:    cal = {coeffs['duv_c']:.4f} * raw + {coeffs['duv_d']:.5f}"
+              + ("  (fallback only)" if coeffs["ccm"] else ""))
         rms_bits = []
         if coeffs["rms_cct"] is not None:
             rms_bits.append(f"{coeffs['rms_cct']:.1f} K")

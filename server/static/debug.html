@@ -71,12 +71,31 @@
     aspect-ratio: 1 / 1; /* stays square as it shrinks, rather than a fixed px size that overflows on mobile */
     max-height: 260px;
   }
+  .compare-cell-raw {
+    width: 100%;
+    height: 70px; /* a shorter strip under the calibrated swatch, same width so the two line up */
+    position: relative;
+  }
+  .compare-cell-raw::after {
+    content: "raw";
+    position: absolute;
+    left: 6px;
+    bottom: 4px;
+    font-size: 10px;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.85);
+    mix-blend-mode: difference;
+  }
+  .compare-cell-raw.hidden {
+    display: none;
+  }
   .compare-cell-label {
     font-size: 11px;
     color: #999;
     padding: 6px 0 2px;
     background: #fff;
     text-align: center;
+    text-transform: uppercase;
   }
   .compare-cell-calnote {
     font-size: 10px;
@@ -84,6 +103,90 @@
     padding-bottom: 6px;
     background: #fff;
     text-align: center;
+  }
+  #compare-controls {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  #fullscreen-btn {
+    font-size: 11px;
+    color: #666;
+    background: #f5f5f5;
+    border: 1px solid #ddd;
+    border-radius: 6px;
+    padding: 4px 10px;
+    cursor: pointer;
+  }
+  #fullscreen-btn:hover {
+    background: #eee;
+  }
+  #gradient-toggle-label, #raw-toggle-label {
+    font-size: 11px;
+    color: #666;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    cursor: pointer;
+    user-select: none;
+  }
+
+  /* --- Fullscreen swatch view: pure colour, equal columns, minimal label.
+     A plain viewport-covering overlay rather than the browser's Fullscreen
+     API -- stays within the browser window (chrome/tabs still visible),
+     just occupies all of it. Columns mirror whichever compare cells are
+     checked -- built once in init(), kept in sync on every poll tick and
+     on every checkbox change, never rebuilt. */
+  #fullscreen-view {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    z-index: 9999;
+    background: #000;
+  }
+  #fullscreen-view.active {
+    display: flex;
+    flex-direction: row;
+  }
+  .fs-col {
+    position: relative;
+    flex: 1 1 0;
+    height: 100%;
+    overflow: hidden; /* clips an overlong label at the column's own edge, rather than letting it bleed into the neighbouring column */
+  }
+  .fs-col.hidden {
+    display: none;
+  }
+  /* Same font size/colour as the compare-cell label (.compare-cell-label)
+     for visual consistency with the rest of the page -- toggled off
+     entirely with "h" for a pure-colour view. */
+  .fs-label {
+    position: absolute;
+    left: 14px;
+    bottom: 14px;
+    right: 14px;
+    font-size: 11px;
+    line-height: 1.4;
+    color: #999;
+    pointer-events: none;
+  }
+  /* Two lines, not one: the sensor name is the one part long enough to need
+     ellipsis (e.g. sensor-00-calibration-source) -- keeping it on its own
+     line means truncating it never eats into the K/live-status line, which
+     is the part actually worth glancing at. */
+  .fs-label-name, .fs-label-reading {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .fs-label-name {
+    text-transform: uppercase;
+  }
+  #fullscreen-view.hide-text .fs-label {
+    display: none;
   }
 
   /* --- Main sensor table. One row per sensor, so adding a 10th or 50th
@@ -120,8 +223,28 @@
   #sensors td.col-sensor {
     white-space: nowrap;
   }
+  #sensors tr.group-heading td {
+    padding: 8px 6px 4px;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: #999;
+    border-bottom: 1px solid #ddd;
+  }
+  #sensors tr.group-heading:not(:first-child) td {
+    padding-top: 32px; /* the visible gap between the deployed and undeployed lists */
+  }
+  #sensors tr.group-heading button {
+    all: inherit;
+    cursor: pointer;
+    padding: 0;
+  }
+  #sensors tr.group-heading button:hover { color: #666; }
+  #sensors-body.undeployed-collapsed tr.undeployed-row { display: none; }
   .sensor-id {
     font-weight: 600;
+    text-transform: uppercase;
   }
   .sensor-sublabel {
     font-size: 11px;
@@ -269,8 +392,15 @@
 
 <div id="compare">
   <div id="compare-label">Side by side, no gap — for judging how close the hues actually are</div>
+  <div id="compare-controls">
+    <label id="gradient-toggle-label"><input type="checkbox" id="gradient-toggle" /> Today's gradient</label>
+    <label id="raw-toggle-label"><input type="checkbox" id="raw-toggle" /> Show uncalibrated</label>
+    <button id="fullscreen-btn" type="button">Full screen ⤢</button>
+  </div>
   <div id="compare-swatches"></div>
 </div>
+
+<div id="fullscreen-view"></div>
 
 <div id="table-scroll">
   <table id="sensors">
@@ -307,7 +437,7 @@ const API = "";  // same-origin; requests go to /api/...
 
 // Below this lux the signal is near the sensor's noise floor and the measured
 // chromaticity is unreliable, so the swatch shows "night" rather than a vivid
-// noise colour. Matches LUX_FLOOR in the frontend (main.js).
+// noise colour. Matches DISPLAY_LUX_FLOOR server-side (main.py).
 const LUX_FLOOR = 1.0;
 
 // Above this age, a sensor's last reading is flagged red rather than just
@@ -317,16 +447,54 @@ const LUX_FLOOR = 1.0;
 // track has a sensor registered.
 const STALE_THRESHOLD_MS = 10 * 60 * 1000;
 
+// "Today's gradient" toggle: buckets the current calendar day (viewer's local
+// midnight to now) into fixed windows via /api/frames and strings the
+// resulting colours into a CSS gradient. 10 min keeps the DOM/style string
+// small while still giving a smooth arc across a full day (<=144 stops).
+// Buckets below DISPLAY_LUX_FLOOR come back with null colour fields from the
+// server -- exactly the "0 lux, out of scope" moments -- and are dropped
+// rather than shown as a gap, so the gradient is built only from the
+// remaining, evenly-spaced stops. Refreshed on its own slower interval
+// (a new bucket appears at most every 10 min, so 5s like the live tick would
+// just be wasted /api/frames queries over a growing day of history).
+const GRADIENT_BUCKET_SECONDS = 600;
+const GRADIENT_REFRESH_MS = 60 * 1000;
+
 // The one unit that ever gets a meter reading typed in directly -- it stays
-// permanently on the bench for exactly this reason (the reference-unit
-// policy, described in the README). Every other sensor calibrates against *this one*
+// permanently on the bench for exactly this reason (see CLAUDE.md's
+// reference-unit policy). Every other sensor calibrates against *this one*
 // instead, via its cct_cal/duv_cal, so no meter is needed for them.
 const REFERENCE_SENSOR_ID = "sensor-00-calibration-source";
+// Units installed at their final site. They are listed first and their compare/
+// fullscreen boxes start ticked; every other registered sensor is listed below a
+// gap as undeployed and starts unticked (tick one to compare). Add an ID here
+// when a unit is installed. sensor-01 deployed 2026-10-06.
+const DEPLOYED_SENSOR_IDS = new Set(["sensor-01"]);
 
 const sensorsBodyEl = document.getElementById("sensors-body");
 const statusEl = document.getElementById("status");
 const compareSwatchesEl = document.getElementById("compare-swatches");
 const compareLabelEl = document.getElementById("compare-label");
+const fullscreenViewEl = document.getElementById("fullscreen-view");
+const fullscreenBtn = document.getElementById("fullscreen-btn");
+const gradientToggleEl = document.getElementById("gradient-toggle");
+const rawToggleEl = document.getElementById("raw-toggle");
+
+// Whether each compare-strip cell also shows a strip of the *uncalibrated*
+// colour (from the raw cie_x/cie_y) under the calibrated swatch. Live mode
+// only -- gradient mode has no raw counterpart. Remembered per browser.
+let showRaw = false;
+try { showRaw = localStorage.getItem("showRaw") === "1"; } catch (e) {}
+rawToggleEl.checked = showRaw;
+
+// Whether the compare-strip/fullscreen swatches show today's gradient instead
+// of the live colour. The small per-row table chip always stays live --
+// gradient detail wouldn't read at 22px, and the table is the diagnostic
+// "what is it seeing right now" view. Populated by init(); each entry is
+// { sensorId, els } so the toggle handler can refresh every sensor at once.
+let gradientMode = false;
+let gradientIntervalId = null;
+const allSensorEls = [];
 
 // Measured CIE x,y chromaticity -> sRGB: the true colour the sensor saw,
 // including the green/magenta tint (Duv) that a single Kelvin number discards.
@@ -352,6 +520,148 @@ function xyToRgb(x, y) {
 function rgbToHex([r, g, b]) {
   const h = (v) => v.toString(16).padStart(2, "0");
   return "#" + h(r) + h(g) + h(b);
+}
+
+function hexToRgb(hex) {
+  const n = parseInt(hex.slice(1), 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
+
+// Ported from the old full-screen colour page (main.js, retired 2026-09-17):
+// the screen there never snapped between readings, it eased from whichever
+// colour was on screen toward the new one over TRANSITION_MS, so it drifted
+// smoothly through the day. Same idea here, applied per-element via a single
+// shared requestAnimationFrame loop (animateLiveColours) instead of a p5.js
+// draw() loop. Matches the 5s poll tick, so a reading's ease completes just
+// as the next one arrives rather than holding still in between.
+const LIVE_TRANSITION_MS = 5000;
+
+function startColourEase(state, targetHex) {
+  state.fromRgb = state.currentRgb || hexToRgb(targetHex);
+  state.toRgb = hexToRgb(targetHex);
+  state.transStart = performance.now();
+}
+
+// Returns the eased [r,g,b] for this frame, or null if this state has no
+// target (e.g. a sensor that has never had a reading) -- callers should
+// leave the element's background alone in that case, not paint anything.
+function stepColourEase(state) {
+  if (!state.toRgb) return null;
+  const t = Math.min(1, (performance.now() - state.transStart) / LIVE_TRANSITION_MS);
+  state.currentRgb = [0, 1, 2].map((i) => state.fromRgb[i] + (state.toRgb[i] - state.fromRgb[i]) * t);
+  return state.currentRgb;
+}
+
+function rgbToCss([r, g, b]) {
+  return "rgb(" + Math.round(r) + ", " + Math.round(g) + ", " + Math.round(b) + ")";
+}
+
+// "YYYY-MM-DD HH:MM:SS" in UTC, matching the naive-UTC format the server
+// stores timestamps in and expects back on /api/frames' start/end params.
+function toServerUtcTimestamp(d) {
+  const p = (n) => String(n).padStart(2, "0");
+  return d.getUTCFullYear() + "-" + p(d.getUTCMonth() + 1) + "-" + p(d.getUTCDate()) +
+    " " + p(d.getUTCHours()) + ":" + p(d.getUTCMinutes()) + ":" + p(d.getUTCSeconds());
+}
+
+// Fetches today's (viewer's local midnight to now) bucketed colour for one
+// sensor and paints it into the compare-strip cell and fullscreen column as
+// a left-to-right CSS gradient, oldest on the left. Buckets below the
+// display lux floor come back with null colour fields from the server (see
+// /api/frames) -- exactly the "0 lux, out of scope" moments -- and are
+// skipped rather than shown as a gap, so evenly-spaced gradient stops fall
+// only on real daylight buckets.
+async function refreshGradientFor(els, sensorId) {
+  try {
+    const now = new Date();
+    const localMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0);
+    const params = new URLSearchParams({
+      sensor_id: sensorId,
+      start: toServerUtcTimestamp(localMidnight),
+      end: toServerUtcTimestamp(now),
+      bucket: String(GRADIENT_BUCKET_SECONDS),
+    });
+    const resp = await fetch(API + "/api/frames?" + params);
+    const frames = await resp.json();
+    const stops = [];
+    for (const f of frames) {
+      const hasCal = f.cie_x_cal != null && f.cie_y_cal != null;
+      const x = hasCal ? f.cie_x_cal : f.cie_x;
+      const y = hasCal ? f.cie_y_cal : f.cie_y;
+      if (x == null || y == null) continue; // below the lux floor -- out of scope
+      stops.push(rgbToHex(xyToRgb(x, y)));
+    }
+    const bg = stops.length === 0 ? "#111111"
+      : stops.length === 1 ? stops[0]
+      : "linear-gradient(to right, " + stops.join(", ") + ")";
+    els.compareColourEl.style.background = bg;
+    els.fsColEl.style.background = bg;
+    els.compareCalNoteEl.textContent = stops.length
+      ? "today's gradient · " + stops.length + " pts"
+      : "no daylight readings yet today";
+  } catch (e) {
+    els.compareCalNoteEl.textContent = "gradient: offline";
+  }
+}
+
+function refreshAllGradients() {
+  for (const { sensorId, els } of allSensorEls) refreshGradientFor(els, sensorId);
+}
+
+// Raw strips show only when ticked and not in gradient mode (no raw gradient).
+function syncRawStrips() {
+  for (const { els } of allSensorEls) {
+    els.compareRawEl.classList.toggle("hidden", !showRaw || gradientMode);
+  }
+}
+
+function wireRawToggle() {
+  rawToggleEl.addEventListener("change", () => {
+    showRaw = rawToggleEl.checked;
+    try { localStorage.setItem("showRaw", showRaw ? "1" : "0"); } catch (e) {}
+    syncRawStrips();
+  });
+  syncRawStrips();
+}
+
+function wireGradientToggle() {
+  gradientToggleEl.addEventListener("change", () => {
+    gradientMode = gradientToggleEl.checked;
+    syncRawStrips();
+    if (gradientMode) {
+      refreshAllGradients();
+      gradientIntervalId = setInterval(refreshAllGradients, GRADIENT_REFRESH_MS);
+    } else {
+      clearInterval(gradientIntervalId);
+      gradientIntervalId = null;
+      // Restore the live colour immediately rather than waiting for the next
+      // 5s tick.
+      for (const { sensorId, els } of allSensorEls) updateLatest(els, sensorId);
+    }
+  });
+}
+
+// Standing requestAnimationFrame loop: paints every sensor's eased colour
+// onto its table chip (always) and its compare/fullscreen swatch (unless
+// gradient mode owns that swatch instead). updateLatest()/the "no data" reset
+// only ever set a *target* (startColourEase) or clear one outright -- this
+// loop is the only thing that actually writes style.background from an
+// ease, so there's one obvious place to look for how a colour lands on
+// screen.
+function animateLiveColours() {
+  for (const { els } of allSensorEls) {
+    const chipRgb = stepColourEase(els.chipEase);
+    if (chipRgb) els.chipEl.style.background = rgbToCss(chipRgb);
+    if (!gradientMode) {
+      const compareRgb = stepColourEase(els.compareEase);
+      if (compareRgb) els.compareColourEl.style.background = rgbToCss(compareRgb);
+      const rawRgb = stepColourEase(els.rawEase);
+      if (rawRgb && els.compareRawEl) els.compareRawEl.style.background = rgbToCss(rawRgb);
+      const fsRgb = stepColourEase(els.fsEase);
+      if (fsRgb) els.fsColEl.style.background = rgbToCss(fsRgb);
+    }
+  }
+  requestAnimationFrame(animateLiveColours);
 }
 
 // Ages here span seconds (a unit publishing on its 30s cadence) to weeks
@@ -396,6 +706,13 @@ function setRowStatus(els, when) {
   }
 }
 
+// Minimal two-line label for the fullscreen swatch -- same live/stale
+// threshold as the table's row status, condensed to a word each.
+function setFsLabel(els, kText, when) {
+  const liveWord = !when ? "no data" : (Date.now() - when.getTime() > STALE_THRESHOLD_MS ? "stale" : "live");
+  els.fsReadingEl.textContent = kText ? kText + " · " + liveWord : liveWord;
+}
+
 // Every sensor gets manual CCT/Duv boxes for typing in a direct meter
 // reading -- useful any time the meter is actually in hand for that sensor
 // (e.g. a rented panel session covering more than just the reference unit),
@@ -430,7 +747,7 @@ function buildSensorRow(sensorId, label) {
 
   const row = document.createElement("tr");
   row.innerHTML = `
-    <td><input type="checkbox" class="compare-check" checked /></td>
+    <td><input type="checkbox" class="compare-check"${DEPLOYED_SENSOR_IDS.has(sensorId) ? " checked" : ""} /></td>
     <td class="col-sensor">
       <div class="sensor-id">${sensorId}</div>
       ${label ? `<div class="sensor-sublabel">${label}</div>` : ""}
@@ -496,6 +813,13 @@ function buildSensorRow(sensorId, label) {
     calibAddVsRefBtn: detailRow.querySelector(".calib-add-vs-ref"),
     calibFitBtn: detailRow.querySelector(".calib-fit"),
     calibMsgEl: detailRow.querySelector(".calib-msg"),
+    // Colour-ease state for the live swatches (see startColourEase/
+    // stepColourEase) -- one independent ease per element, since the
+    // fullscreen column can be hidden/shown independently of the table row.
+    chipEase: {},
+    compareEase: {},
+    rawEase: {},
+    fsEase: {},
   };
 }
 
@@ -509,14 +833,33 @@ function buildCompareCell(sensorId) {
   cell.className = "compare-cell";
   cell.innerHTML = `
     <div class="compare-cell-colour"></div>
+    <div class="compare-cell-raw hidden"></div>
     <div class="compare-cell-label">${sensorId}</div>
     <div class="compare-cell-calnote">—</div>
   `;
   return {
     cell,
     colourEl: cell.querySelector(".compare-cell-colour"),
+    rawEl: cell.querySelector(".compare-cell-raw"),
     calNoteEl: cell.querySelector(".compare-cell-calnote"),
   };
+}
+
+// Colour column for the fullscreen view, plus one small overlaid label
+// (sensor name, current K, live/stale) -- hidden entirely with "h" for a
+// pure-colour view, shown by default for orientation.
+function buildFullscreenCol(sensorId) {
+  const col = document.createElement("div");
+  col.className = "fs-col";
+  const label = document.createElement("div");
+  label.className = "fs-label";
+  label.innerHTML = `<div class="fs-label-name"></div><div class="fs-label-reading"></div>`;
+  const nameEl = label.querySelector(".fs-label-name");
+  const readingEl = label.querySelector(".fs-label-reading");
+  nameEl.textContent = sensorId;
+  readingEl.textContent = "—";
+  col.appendChild(label);
+  return { col, nameEl, readingEl };
 }
 
 function updateCompareLabel() {
@@ -529,10 +872,32 @@ function updateCompareLabel() {
 function wireCompareCheckbox(els) {
   const sync = () => {
     els.compareCell.classList.toggle("hidden", !els.checkboxEl.checked);
+    els.fsColEl.classList.toggle("hidden", !els.checkboxEl.checked);
     updateCompareLabel();
   };
   els.checkboxEl.addEventListener("change", sync);
   sync();
+}
+
+// Plain viewport-covering overlay, not the browser's Fullscreen API -- stays
+// inside the browser window (tabs/chrome untouched), so exiting is entirely
+// our own UI: Escape, or a click/tap anywhere on the swatches.
+function setFullscreenActive(active) {
+  fullscreenViewEl.classList.toggle("active", active);
+  fullscreenBtn.textContent = active ? "Exit (Esc)" : "Full screen ⤢";
+}
+
+function wireFullscreenButton() {
+  fullscreenBtn.addEventListener("click", () => setFullscreenActive(true));
+  fullscreenViewEl.addEventListener("click", () => setFullscreenActive(false));
+  document.addEventListener("keydown", (e) => {
+    if (!fullscreenViewEl.classList.contains("active")) return;
+    if (e.key === "Escape") {
+      setFullscreenActive(false);
+    } else if (e.key === "h" || e.key === "H") {
+      fullscreenViewEl.classList.toggle("hide-text");
+    }
+  });
 }
 
 async function updateLatest(els, sensorId) {
@@ -543,6 +908,25 @@ async function updateLatest(els, sensorId) {
       els.cctEl.textContent = "waiting…";
       els.calNoteEl.textContent = "—";
       setRowStatus(els, null);
+      setFsLabel(els, null, null);
+      // Reset the swatches too, bypassing the ease -- otherwise a sensor with
+      // no data at all would stay stuck on whatever it last showed (a live
+      // colour, or whatever the gradient toggle last painted there), since
+      // this early return would never overwrite it. There's no meaningful
+      // colour to ease *toward* for "no data", so this is a hard cut, not a
+      // fade, in both the ease state and the elements it's about to stop
+      // driving.
+      els.chipEase.toRgb = null;
+      els.chipEl.style.background = "";
+      if (!gradientMode) {
+        els.compareEase.toRgb = null;
+        els.compareColourEl.style.background = "";
+        els.rawEase.toRgb = null;
+        els.compareRawEl.style.background = "";
+        els.compareCalNoteEl.textContent = "—";
+        els.fsEase.toRgb = null;
+        els.fsColEl.style.background = "";
+      }
       return;
     }
 
@@ -571,24 +955,39 @@ async function updateLatest(els, sensorId) {
       hex = "#111111";
       els.hexEl.textContent = "night";
       els.swatchCalNoteEl.textContent = "—";
-      els.compareCalNoteEl.textContent = "—";
+      if (!gradientMode) els.compareCalNoteEl.textContent = "—";
     } else if (swatchX != null && swatchY != null) {
       hex = rgbToHex(xyToRgb(swatchX, swatchY));
       els.hexEl.textContent = hex.toUpperCase();
       const calNote = swatchHasCal ? "calibrated" : "raw · uncalibrated";
       els.swatchCalNoteEl.textContent = calNote;
-      els.compareCalNoteEl.textContent = calNote;
+      if (!gradientMode) els.compareCalNoteEl.textContent = calNote;
     } else {
       hex = "#eeeeee";
       els.hexEl.textContent = "—";
       els.swatchCalNoteEl.textContent = "—";
-      els.compareCalNoteEl.textContent = "—";
+      if (!gradientMode) els.compareCalNoteEl.textContent = "—";
     }
-    els.chipEl.style.backgroundColor = hex;
-    // Same computed hex feeds the side-by-side comparison strip, so the two
-    // views can never disagree due to being fetched at slightly different
-    // moments -- one fetch, both swatches.
-    els.compareColourEl.style.backgroundColor = hex;
+    // The small table chip always shows the live colour, gradient mode or
+    // not. The compare-strip cell and fullscreen column are the ones that
+    // switch to today's gradient -- skip starting an ease for them here so
+    // the 5s live tick doesn't clobber it; refreshGradientFor() (on its own
+    // slower interval) owns their background while gradient mode is on. This
+    // only sets the *target* -- animateLiveColours() (a standing
+    // requestAnimationFrame loop) is what actually paints the eased colour
+    // onto the elements, frame by frame.
+    startColourEase(els.chipEase, hex);
+    let rawHex = "#eeeeee";
+    if (lowLight) rawHex = "#111111";
+    else if (data.cie_x != null && data.cie_y != null) rawHex = rgbToHex(xyToRgb(data.cie_x, data.cie_y));
+    if (!gradientMode) {
+      startColourEase(els.rawEase, rawHex);
+      // Same computed hex feeds both remaining views, so they can never
+      // disagree due to being fetched at slightly different moments -- one
+      // fetch, both swatches.
+      startColourEase(els.compareEase, hex);
+      startColourEase(els.fsEase, hex);
+    }
 
     // Server stores naive UTC strings ("2026-06-22 13:12:00"). Tell the
     // browser it's UTC (replace space with "T", append "Z"), then render it
@@ -596,6 +995,7 @@ async function updateLatest(els, sensorId) {
     const when = new Date(data.timestamp.replace(" ", "T") + "Z");
     els.timeEl.textContent = when.toLocaleString();
     setRowStatus(els, when);
+    setFsLabel(els, Math.round(hasCal ? data.cct_cal : data.cct) + "K", when);
 
     // Tint (Duv): how far off the blackbody locus the light sits — the axis CCT
     // alone throws away. Positive is greenish (above the locus), negative is
@@ -659,8 +1059,29 @@ async function updateDiag(els, sensorId) {
     const overload = d.overload
       ? '<span class="warn">YES — saturated!</span>'
       : "no";
+    // Wi-Fi link quality, from firmware that reports wifi_rssi (older units
+    // omit it). Rough bands for the ESP32: > -60 solid, -60..-70 usable,
+    // < -70 marginal and prone to dropouts.
+    let wifi = "—";
+    if (d.wifi_rssi != null) {
+      const r = d.wifi_rssi;
+      const band = r > -60 ? "good" : r >= -70 ? "fair" : "weak";
+      const ssid = d.wifi_ssid
+        ? " (" + String(d.wifi_ssid).replace(/[&<>"']/g, c => "&#" + c.charCodeAt(0) + ";") + ")"
+        : "";
+      wifi = band === "weak"
+        ? '<span class="warn">' + r + " dBm " + band + "</span>" + ssid
+        : r + " dBm " + band + ssid;
+    }
+    // Readings the unit is holding to send later (store-and-forward firmware
+    // only; approximate for the part already on its flash).
+    let backlog = "";
+    if (d.backlog_rows != null && d.backlog_rows > 0) {
+      backlog = ' · <span class="warn">Backlog: ~' + d.backlog_rows.toLocaleString() + "</span>";
+    }
     els.diagEl.innerHTML =
-      "Lux: " + lux + " · x,y: " + xy + " · Z/X: " + zx + " · Overload: " + overload;
+      "Lux: " + lux + " · x,y: " + xy + " · Z/X: " + zx + " · Overload: " + overload +
+      " · WiFi: " + wifi + backlog;
 
     if (d.battery_pct != null) {
       const pct  = d.battery_pct.toFixed(1) + "%";
@@ -840,8 +1261,50 @@ async function init() {
   statusEl.textContent = "";
   sensorsBodyEl.innerHTML = "";
   compareSwatchesEl.innerHTML = "";
-  for (const s of sensors) {
+  // Deployed units first, then a gap and the undeployed ones; each group keeps
+  // the server's order. The group headings only show when both groups exist.
+  const deployed = sensors.filter((s) => DEPLOYED_SENSOR_IDS.has(s.sensor_id));
+  const undeployed = sensors.filter((s) => !DEPLOYED_SENSOR_IDS.has(s.sensor_id));
+  const split = deployed.length > 0 && undeployed.length > 0;
+  const addGroupHeading = (text) => {
+    const tr = document.createElement("tr");
+    tr.className = "group-heading";
+    tr.innerHTML = `<td colspan="11">${text}</td>`;
+    sensorsBodyEl.appendChild(tr);
+    return tr;
+  };
+  if (split) addGroupHeading("Deployed");
+  // The undeployed list is collapsed by default behind its heading, and the
+  // choice is remembered per browser. Collapsed rows are only hidden: they keep
+  // polling, so opening the list shows current data straight away.
+  let undeployedOpen = false;
+  try { undeployedOpen = localStorage.getItem("undeployedOpen") === "1"; } catch (e) {}
+  const applyUndeployedOpen = (btn) => {
+    sensorsBodyEl.classList.toggle("undeployed-collapsed", split && !undeployedOpen);
+    if (btn) {
+      btn.textContent = (undeployedOpen ? "\u25BE " : "\u25B8 ") + "Undeployed (" + undeployed.length + ")";
+      btn.setAttribute("aria-expanded", undeployedOpen ? "true" : "false");
+    }
+  };
+  for (const s of [...deployed, ...undeployed]) {
+    const isUndeployed = !DEPLOYED_SENSOR_IDS.has(s.sensor_id);
+    if (split && s === undeployed[0]) {
+      const tr = addGroupHeading("");
+      const btn = document.createElement("button");
+      btn.type = "button";
+      tr.firstElementChild.appendChild(btn);
+      btn.addEventListener("click", () => {
+        undeployedOpen = !undeployedOpen;
+        try { localStorage.setItem("undeployedOpen", undeployedOpen ? "1" : "0"); } catch (e) {}
+        applyUndeployedOpen(btn);
+      });
+      applyUndeployedOpen(btn);
+    }
     const els = buildSensorRow(s.sensor_id, s.label);
+    if (isUndeployed) {
+      els.row.classList.add("undeployed-row");
+      els.detailRow.classList.add("undeployed-row");
+    }
     sensorsBodyEl.appendChild(els.row);
     sensorsBodyEl.appendChild(els.detailRow);
 
@@ -850,7 +1313,15 @@ async function init() {
     els.compareCell = compareCell.cell;
     els.compareColourEl = compareCell.colourEl;
     els.compareCalNoteEl = compareCell.calNoteEl;
+    els.compareRawEl = compareCell.rawEl;
+
+    const fsCol = buildFullscreenCol(s.sensor_id);
+    fullscreenViewEl.appendChild(fsCol.col);
+    els.fsColEl = fsCol.col;
+    els.fsReadingEl = fsCol.readingEl;
+
     wireCompareCheckbox(els);
+    allSensorEls.push({ sensorId: s.sensor_id, els });
 
     wireCalibForm(els, s.sensor_id);
     const tick = () => {
@@ -862,6 +1333,10 @@ async function init() {
     setInterval(tick, 5000);
   }
   updateCompareLabel();
+  wireFullscreenButton();
+  wireGradientToggle();
+  wireRawToggle();
+  requestAnimationFrame(animateLiveColours);
 }
 
 init();
