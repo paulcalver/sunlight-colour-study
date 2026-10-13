@@ -1,98 +1,35 @@
 # Sunlight Colour Study
 
-**Sunlight Colour Study: the sun's colours, gathered from many places into one view, moment by moment.**
+The sun's colours, gathered from many places into one view, moment by moment.
 
-The light that leaves the sun is the same white for all of us. Everything that happens to its colour happens here: miles of air, cloud, dust, the haze over a city. The flat grey of a wet afternoon, the warmth before a sunset, the hard clear light of a northern coast, all of it the same sun, met differently.
+The light that leaves the sun is the same white for all of us. Everything that happens to its colour happens here: miles of air, cloud, dust, the haze over a city. All of it the same sun, met differently.
 
-*The quiet natural beauty of light shifting across the world.*
+Small sensors on rooftops in different parts of the world read the colour of the daylight above them. For now there is one, in London, and the days gather on the project page as cells played in step, so one morning can be watched beside another.
 
-Small sensors on rooftops in different parts of the world read the colour of the daylight above them. For now there is one, in London, and the days gather on the project page as a grid of cells, played in step so one morning can be watched beside another.
+You already know this light. It is the cool blue of an overcast day, the warmth of low sun, falling on you while your eye quietly edits it away. Alone, each colour is almost nothing. Together, their differences make each one visible, first as days, then as places.
 
-![A sensor unit mounted at the top of a pole, seen from below against bright sky — the enclosure with its dome facing up, solar panel angled beneath it, sun and cumulus cloud behind.](media/deployed-prototype-still.jpg)
-
-*A prototype unit in place, dome to the sky.*
-
-This work is an exploration of the ever-shifting beauty of the colour of light. Alone, each colour is almost nothing. Together, their differences make each one visible, first as days, then as places. Whether that light can shift your mood, whether it can be felt as well as seen, is not a question this work answers. It is the question it puts to you.
-
-*Colour, arriving from somewhere else.*
-
-A work in progress, and openly so. One sensor is reading a London sky now; others will follow, and the grid will widen from one city to many. What form the work finally takes, whether light, projection, or something else, is still being explored.
+A work in progress.
 
 **[8minutes20.studio/sunlight-colour-study](https://8minutes20.studio/sunlight-colour-study)**
 
-If you would like to hear more about the project's plans and ambitions, please do get in touch.
-
----
-
-## In plain terms
-
-Hold an identical piece of white paper under the sun in different places and it looks a subtly different colour, not because the paper changes, but because the light falling on it does. The eye compensates for this automatically and mostly hides it; the sensor does not, and records the daylight's actual colour instead. The long-term aim is a distributed network of these sensors, one per site (London first, then elsewhere), each adding to the same grid of days, so that difference becomes something you can see and compare directly.
+![A sensor unit mounted at the top of a pole, seen from below against bright sky — the enclosure with its dome facing up, solar panel angled beneath it, sun and cumulus cloud behind.](media/deployed-prototype-still.jpg)
 
 ## Status
 
-Three units exist. `sensor-00` is the bench reference: it stays indoors permanently and is never deployed, so every future unit can be checked against it rather than against a borrowed meter each time. `sensor-01` has been on a London rooftop since 6 October 2026, reading the sky every few seconds; each finished day becomes a cell in the grid. `sensor-02` will go somewhere else once there is a site for it.
+Three units, all rebuilt around new optics and recalibrated in September 2026:
 
-**Only one unit is deployed.** All three were rebuilt around the new optics described below and recalibrated in September 2026; `sensor-00` and `sensor-02` are on the bench. What is still to do is an outdoor check of that calibration against the reference meter under real sun, and a site for the next unit. The photographs here show prototypes in place, not the finished network.
+- `sensor-00` is the bench reference. It stays indoors, and every future unit is checked against it.
+- `sensor-01` has been on a London rooftop since 6 October 2026. Each finished day becomes a cell in the grid.
+- `sensor-02` is on the bench, waiting for a site.
 
-### The dome problem, and its fix
-
-Field readings through the summer of 2026 showed a colour-temperature error that tracked ambient UV rather than the light being measured: on the first outdoor comparison against a reference meter, all three units read between 900K and 1,160K too high, consistently, within seconds of each other. Duv barely moved, which is the signature of added blue light rather than a mis-aimed sensor or a bad fit.
-
-The cause was optical brighteners fluorescing under sunlight — the material absorbs ultraviolet and re-emits it as visible blue, straight into the sensor. A 365nm test in August 2026 confirmed the source: the dome glowed strongly, the printed mixing tube behind it only slightly. Studio calibration had been structurally blind to this, because the lamp used for it emits almost no UV. The error only ever appeared in real sun.
-
-It could not be fitted out afterwards, for reasons covered under [Calibration: physical](#calibration-physical) below. The fix had to be a material change, and that is now resolved. **LIT Systems**, who make the Lit Duo 1 spectrometer, supplied dome diffusers, UV/IR cutoff filters and black foam mounting rings from their own instrument — known-good parts from a working commercial colour meter rather than another material of unknown provenance. All of them pass the 365nm test. Domes were chosen over the flat diffusers deliberately, to keep the warmth of low sun in the readings rather than have it cosine-weighted away.
-
-The enclosure has been reworked around them, and the printed mixing chamber is gone entirely: the foam ring mounts the filter directly over the OPT4048 and the dome sits close above it, so the light path is dome, filter, sensor, with no white plastic in it anywhere. That second change is not only about fluorescence — white ASA yellows over time, a slow, invisible spectral drift that would quietly invalidate any calibration fit. The files in [`mechanical/`](mechanical/) are this revision.
-
-## Technical notes
-
-Adafruit QT Py ESP32-S2, OPT4048 tristimulus colour sensor, Voltaic P126 solar panel (6V, 2W), 2000 mAh LiPo battery, BQ24074 charge controller, MQTT over Wi-Fi, custom 3D-printed enclosure. On-device loop: read CIE x,y chromaticity and lux, publish over MQTT. Server: convert to kelvin, render true colour from the raw measurement. Each unit is designed and hand-built, running on solar power alone with no mains connection. The sensor measures the light itself, not the sky's appearance.
-
-![Three views of a sensor unit: the assembled enclosure beside its solar panel, the same unit opened out to show the dome, the stacked boards and the battery sled, and the handheld reference colour meter reading 5417K at +0.005 Duv.](media/prototype_01.jpg)
-
-*Left: an assembled unit with its solar panel. Centre: the same unit opened out — dome and clamp ring, sensor deck, and the sled carrying the microcontroller, fuel gauge and charge controller. Right: the reference colour meter the units are calibrated against. This is the earlier flanged-dome build; the clamp ring and mixing tube are gone in the current revision.*
-
-The rest of this page is the long version of that summary.
-
----
+Still to do: check the calibration against the reference meter under real sun.
 
 ## How it works
 
-Sensor to `hex`: what each reading goes through, and how separate units are checked against each other and against a physical reference.
+Each unit is a solar-powered, hand-built sensor: an OPT4048 tristimulus colour sensor under a diffusing dome, read by an Adafruit QT Py ESP32-S2 and published over MQTT. The server adds tint (Duv), solar position and a per-unit calibration, and renders the measured chromaticity as true colour for the grid.
 
-### Sensor
-
-An `OPT4048` tristimulus colour sensor sits behind the dome and diffuser, reading four raw channels (`X`, `Y`, `Z`, and a clear `W` channel) once per publish cycle. Unlike an RGB camera sensor, these four channels are built to match the CIE 1931 colour-matching functions directly, so colour and level convert straight to standard colorimetric quantities, CIE `x, y` chromaticity and lux, without a lookup table in between.
-
-### On the device
-
-The microcontroller reads the sensor, takes its `x, y` chromaticity, and derives correlated colour temperature (CCT): the temperature of the blackbody radiator whose colour is the nearest match on the CIE diagram. `cct`, `lux`, `cie_x`, `cie_y`, the raw channel counts, a sensor-overload flag, and battery state are packaged as JSON and published over MQTT to a self-hosted broker. Readings it cannot send are kept on the device and published later, filed at the time they were taken, and it joins the strongest known Wi-Fi network in range.
-
-### On the server
-
-CCT alone collapses a two-dimensional colour to a single number along the blackbody curve, discarding the axis perpendicular to it: whether the light sits slightly green or slightly magenta of a true blackbody at that temperature. The server recovers that as **Duv**, computed from the stored `x, y` using the CIE 1960 UCS transform and a closed-form fit to the Planckian locus (Ohno, 2011), accurate to a few parts in 10⁻⁴ across the daylight range. Each reading is also stamped with the sensor's registered location and the sun's elevation and azimuth at that instant, so a colour can be read against time of day and season, not just in isolation. The server also averages readings into ten-minute samples, which is what the project page's grid is built from: one cell per London day, 06:00 to 20:00, each played from a flat first light colour as the day fills in.
-
-### Colour you see
-
-The colour in the daily grid and on the debug page is the sensor's measured chromaticity rendered as true colour, not a Kelvin-to-RGB approximation. `x, y` is converted to CIE XYZ at unit luminance, then to linear sRGB with the standard D65 primary matrix. Out-of-gamut negative values are clipped, and the result is normalised so the brightest channel reads full strength, brightness being deliberately discarded here, so the display is a pure colour comparison rather than an exposure match. sRGB gamma is applied and the three channels are rounded to 8 bits, giving the `hex` value.
-
-### Calibration: computational
-
-A correction is fitted per unit against a trusted physical reference and applied at ingest, the same stage Duv is already computed at. Since the September 2026 recalibration it is a 3×3 matrix on the raw CIE `x, y`, not two separate adjustments in mireds and Duv: these sensors' colour-temperature and tint errors interact (their tint response grows at warm colour temperatures), which two independent corrections cannot model. Held-out tests on 21 reference points per unit predict colour temperature to about 30 to 55K on the blackbody locus and Duv to about 0.001, against 135 to 260K and 0.003 to 0.005 for the earlier pair. Raw values are never overwritten: the calibrated columns sit alongside them, so a fit can be refined or redone as more reference data comes in without losing anything.
-
-### Calibration: physical
-
-That reference comes from a direct comparison indoors, before a unit goes outside. In September 2026 the three units were set under a rented colour-tunable studio light (an ARRI SkyPanel S30-C) and read against the Lit Duo 1 colour meter, stepping through the daylight range of colour temperatures and through green and magenta tints. Once the fit is established:
-
-- one unit deploys to its site (`sensor-01`, on 6 October 2026),
-- another stays permanently on the bench as a fixed source of truth, and
-- every future unit gets checked against that bench reference, rather than against the meter each time.
-
-The reference unit is never itself installed outdoors, so its own drift stays out of the loop.
-
-This is also the limit the dome problem ran into. A fit can absorb a bias that is stable, or one that varies with colour temperature itself, because both are recoverable from the reading. It cannot absorb one driven by ambient UV, which varies independently of the colour being measured, and that is why the fix had to be a material change rather than a better fit. A check against the meter under real sun, which the studio light cannot stand in for, is still to be done: it is the test that shows whether the new optics have removed the UV error for good.
-
----
+- [How it works](docs/how-it-works.md): hardware, the path from sensor to colour, and calibration.
+- [The dome and UV](docs/dome-and-uv.md): how the original dome fluoresced in sunlight and pushed readings about 1,000K too blue, and the fix.
 
 ## This repository
 
@@ -108,6 +45,7 @@ This is also the limit the dome problem ran into. A fit can absorb a bias that i
     server/       Ingests MQTT, computes Duv and solar position, stores
                   readings, serves 10-minute samples for the daily grid, and
                   holds the calibration and diagnostics pages.
+    docs/         The longer write-ups linked above.
 
 Host addresses in `firmware/qt-py/settings.toml.example` are placeholders. Set `MQTT_BROKER`, `MQTT_USERNAME`, `MQTT_PASSWORD` and, if you want over-the-air updates, `OTA_BASE_URL` for your own deployment.
 
@@ -117,10 +55,7 @@ A full build guide — bill of materials, wiring, assembly, print settings — i
 
 **Paul Calver** — [paulcalver@me.com](mailto:paulcalver@me.com)
 
-Project page: [8minutes20.studio/sunlight-colour-study](https://8minutes20.studio/sunlight-colour-study)
-
-Do get in touch about putting a sensor on a roof somewhere the network does not
-yet reach, or about the project generally.
+Get in touch about putting a sensor on a roof somewhere the network does not yet reach, or about the project generally.
 
 ## Licence
 
