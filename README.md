@@ -24,6 +24,18 @@ Three units, all rebuilt around new optics and recalibrated in September 2026:
 
 Still to do: check the calibration against the reference meter under real sun.
 
+## Planned updates
+
+**A cellular version.** The current units send over Wi-Fi, which limits them to rooftops within reach of a usable network, and there are few of those. The next unit sends over the mobile network instead, through a Blues Notecard with a built-in global eSIM, so a sensor can go anywhere with a phone signal.
+
+It is also being built around a much smaller power budget:
+
+- **A custom board** carries a low-power nRF52840 microcontroller in place of the ESP32, with the charger, battery gauge and solar monitoring on the same small board.
+- **The radio sleeps.** Readings are queued on the unit and sent in scheduled batches, instead of holding a Wi-Fi connection open all day. On paper that uses 20 to 100 times less energy than the current units, which draw 65 to 70 mA through the day.
+- **All in one piece.** A smaller 1.2 W solar panel is built into the south face of the housing, so the whole unit goes up on a single mount.
+
+The modem is being tested on the bench, the board is designed, and the housing is in its first revision. The power figures are estimates until the bench test measures them.
+
 ## How it works
 
 Each unit is a solar-powered, hand-built sensor: an OPT4048 tristimulus colour sensor under a diffusing dome, read by an Adafruit QT Py ESP32-S2 and published over MQTT. The server adds tint (Duv), solar position and a per-unit calibration, and renders the measured chromaticity as true colour for the grid.
