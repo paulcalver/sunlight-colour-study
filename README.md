@@ -16,17 +16,13 @@ A work in progress.
 
 ## Status
 
-Three units, all rebuilt around new optics and recalibrated in September 2026:
-
-- `sensor-00` is the bench reference. It stays indoors, and every future unit is checked against it.
-- `sensor-01` has been on a London rooftop since 6 October 2026. Each finished day becomes a cell in the grid.
-- `sensor-02` is on the bench, waiting for a site.
+The three Wi-Fi units (`sensor-00`, `sensor-01` and `sensor-02`) are now shelved. `sensor-01` sent a day of colour from a London rooftop from 6 October 2026, and those days stay in the grid. The work has moved to the cellular version below.
 
 Still to do: check the calibration against the reference meter under real sun.
 
 ## The cellular version
 
-The current units send over Wi-Fi, which limits them to rooftops within reach of a usable network, and there are few of those. The next unit sends over the mobile network instead, through a Blues Notecard with a built-in global eSIM, so a sensor can go anywhere with a phone signal.
+The Wi-Fi units limited a sensor to rooftops within reach of a usable network, and there are few of those. The cellular unit sends over the mobile network instead, through a Blues Notecard with a built-in global eSIM, so a sensor can go anywhere with a phone signal.
 
 It is also built around a much smaller power budget:
 
@@ -35,7 +31,7 @@ It is also built around a much smaller power budget:
 - **Four colour sensors per unit.** Each is calibrated against the reference, and their readings are blended into one.
 - **All in one piece.** A small solar panel is built into the housing, so the whole unit goes up on a single mount.
 
-A first unit is running in London on trial. It is not yet proven on battery and solar alone, and power figures remain estimates until it has been measured over a full run.
+A first unit is now the one feeding the London grid, on trial. It is not yet proven on battery and solar alone, and power figures remain estimates until it has been measured over a full run.
 
 ## How it works
 
